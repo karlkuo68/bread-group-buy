@@ -206,7 +206,7 @@ tbody td{padding:8px 11px;vertical-align:top}
       <div class="inp-group"><label class="inp-label">角色</label>
         <select class="select-role" id="regRole" onchange="toggleRegFields()"><option value="merchant">商家</option><option value="cs">客服人員</option><option value="admin">管理者</option></select>
       </div>
-      <div class="inp-group" id="regBusinessGroup"><label class="inp-label">商家名稱</label><input class="inp" id="regBusiness" placeholder="輸入商家名稱"></div>
+      <div class="inp-group" id="regBusinessGroup"><label class="inp-label">商家名稱</label><select class="select-role" id="regBusiness"><option value="">（請選擇商家）</option></select></div>
       <div class="inp-group"><label class="inp-label">個人暱稱</label><input class="inp" id="regNickname" placeholder="輸入暱稱"></div>
       <div class="login-err" id="regErr"></div>
       <button class="btn btn-primary" style="width:100%;margin-top:8px;justify-content:center;padding:12px" onclick="doRegister()">註冊</button>
@@ -360,7 +360,7 @@ tbody td{padding:8px 11px;vertical-align:top}
       <div class="section-title">新增帳號</div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;gap:7px;flex-wrap:wrap"><input class="inp" id="newPhone" placeholder="電話（帳號）" style="width:150px"><input class="inp" id="newPw" placeholder="密碼" style="width:130px"><select class="select-in" id="newRole"><option value="merchant">商家</option><option value="cs">客服人員</option><option value="admin">管理者</option></select></div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap"><input class="inp" id="newNick" placeholder="暱稱" style="width:130px"><input class="inp" id="newBiz" placeholder="商家名稱（商家需填）" style="width:180px"><button class="btn btn-primary btn-sm" onclick="addUser()">＋ 新增</button></div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap"><input class="inp" id="newNick" placeholder="暱稱" style="width:130px"><select class="select-in" id="newBiz" style="width:180px"><option value="">（選擇商家）</option></select><button class="btn btn-primary btn-sm" onclick="addUser()">＋ 新增</button></div>
       </div>
     </div>
   </div>
@@ -419,29 +419,32 @@ const RC={admin:'role-admin',cs:'role-cs',merchant:'role-merchant'};
 let CUR=null;
 function initAuth(){
   let u=DB.get('users');if(!u)u=[];
-  u=u.map(x=>{if(x.username&&!x.phone){x.phone=x.username;delete x.username}if(!x.nickname)x.nickname=x.phone||'';if(!x.businessName)x.businessName='';if(!x.role||x.role==='user')x.role='cs';return x});
+  u=u.map(x=>{if(x.username&&!x.phone){x.phone=x.username;delete x.username}if(!x.nickname)x.nickname=x.phone||'';if(!x.businessName)x.businessName='';if(!x.role||x.role==='user')x.role='cs';if(x.approved===undefined)x.approved=true;return x});
   u=u.filter(x=>x.phone!=='admin');
-  if(!u.find(x=>x.phone==='0988789356'))u.push({phone:'0988789356',password:'123123',role:'admin',nickname:'管理者',businessName:'',createdAt:new Date().toLocaleString('zh-TW')});
+  if(!u.find(x=>x.phone==='0988789356'))u.push({phone:'0988789356',password:'123123',role:'admin',nickname:'管理者',businessName:'',approved:true,createdAt:new Date().toLocaleString('zh-TW')});
   DB.set('users',u);
 }
-function showRegister(){el('loginForm').classList.add('hidden');el('registerForm').classList.remove('hidden');el('authSubtitle').textContent='註冊新帳號';toggleRegFields()}
+function showRegister(){el('loginForm').classList.add('hidden');el('registerForm').classList.remove('hidden');el('authSubtitle').textContent='註冊新帳號';populateRegMerchantSelect();toggleRegFields()}
 function showLogin(){el('registerForm').classList.add('hidden');el('loginForm').classList.remove('hidden');el('authSubtitle').textContent='請登入以繼續'}
 function toggleRegFields(){el('regBusinessGroup').classList.toggle('hidden',el('regRole').value!=='merchant')}
+function populateRegMerchantSelect(){const list=getMerchants();el('regBusiness').innerHTML='<option value="">（請選擇商家）</option>'+list.map(n=>`<option value="${n}">${n}</option>`).join('')}
+function populateNewBizSelect(){const list=getMerchants();el('newBiz').innerHTML='<option value="">（選擇商家）</option>'+list.map(n=>`<option value="${n}">${n}</option>`).join('')}
 function doLogin(){
   const u=el('loginUser').value.trim(),p=el('loginPass').value;
   if(!u||!p){el('loginErr').textContent='請填入帳號和密碼';return}
   const users=DB.get('users')||[];const f=users.find(x=>x.phone===u&&x.password===p);
   if(!f){el('loginErr').textContent='帳號或密碼錯誤';return}
+  if(f.approved===false){el('loginErr').textContent='帳號尚未核可，請聯繫管理者';return}
   CUR=f;localStorage.setItem('bread_session',JSON.stringify({phone:u,role:f.role,ts:Date.now()}));enterApp();
 }
 function doRegister(){
   const phone=el('regPhone').value.trim(),pw=el('regPass').value,pw2=el('regPass2').value,role=el('regRole').value,nick=el('regNickname').value.trim(),biz=el('regBusiness').value.trim(),err=el('regErr');
   if(!phone){err.textContent='請輸入電話';return}if(!pw||pw.length<4){err.textContent='密碼至少4碼';return}
   if(pw!==pw2){err.textContent='密碼不一致';return}if(!nick){err.textContent='請輸入暱稱';return}
-  if(role==='merchant'&&!biz){err.textContent='商家請填商家名稱';return}
+  if(role==='merchant'&&!biz){err.textContent='商家請選擇商家名稱';return}
   const users=DB.get('users')||[];if(users.find(x=>x.phone===phone)){err.textContent='此電話已被註冊';return}
-  users.push({phone,password:pw,role,nickname:nick,businessName:role==='merchant'?biz:'',createdAt:new Date().toLocaleString('zh-TW')});
-  DB.set('users',users);CUR=users[users.length-1];localStorage.setItem('bread_session',JSON.stringify({phone,role,ts:Date.now()}));enterApp();notify('✅ 註冊成功！');
+  users.push({phone,password:pw,role,nickname:nick,businessName:role==='merchant'?biz:'',approved:false,createdAt:new Date().toLocaleString('zh-TW')});
+  DB.set('users',users);notify('✅ 註冊成功！請等待管理者核可後即可登入。');showLogin();
 }
 function enterApp(){
   el('loginScreen').classList.add('hidden');el('mainApp').classList.remove('hidden');
@@ -453,7 +456,7 @@ function enterApp(){
   el('tab-import').classList.toggle('hidden',isMerchant);
   el('tab-settings').classList.toggle('hidden',isMerchant);
   if(isMerchant){switchTab('orders')}
-  loadSettings();renderUsers();refreshMerchantSelect();showAllBatches();
+  loadSettings();renderUsers();refreshMerchantSelect();populateNewBizSelect();showAllBatches();
   if(CUR.role==='admin')checkAutoBackup();
 }
 function doLogout(){localStorage.removeItem('bread_session');CUR=null;el('mainApp').classList.add('hidden');el('loginScreen').classList.remove('hidden');showLogin();el('loginUser').value='';el('loginPass').value=''}
@@ -464,13 +467,26 @@ function addUser(){
   if(!phone||!pw){notify('電話和密碼不可空白',true);return}if(!nick){notify('請填暱稱',true);return}
   if(rl==='merchant'&&!biz){notify('商家需填商家名稱',true);return}
   const u=DB.get('users')||[];if(u.find(x=>x.phone===phone)){notify('電話已存在',true);return}
-  u.push({phone,password:pw,role:rl,nickname:nick,businessName:rl==='merchant'?biz:'',createdAt:new Date().toLocaleString('zh-TW')});
+  u.push({phone,password:pw,role:rl,nickname:nick,businessName:rl==='merchant'?biz:'',approved:true,createdAt:new Date().toLocaleString('zh-TW')});
   DB.set('users',u);renderUsers();['newPhone','newPw','newNick','newBiz'].forEach(id=>el(id).value='');notify(`✅ 已新增 ${nick}`);
 }
 function delUser(p){if(p===CUR.phone){notify('不能刪除自己',true);return}DB.set('users',(DB.get('users')||[]).filter(x=>x.phone!==p));renderUsers();notify('已刪除')}
+function approveUser(p){
+  const users=DB.get('users')||[];const f=users.find(x=>x.phone===p);if(!f)return;
+  f.approved=true;DB.set('users',users);renderUsers();notify(`✅ 已核可「${f.nickname}」`);
+}
 function renderUsers(){
   const u=DB.get('users')||[];
-  el('userList').innerHTML=u.map(x=>`<div class="user-row"><span>👤</span><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">🏪 ${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${x.phone!==CUR?.phone&&CUR?.role==='admin'?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}</div>`).join('');
+  const pending=u.filter(x=>x.approved===false);
+  const approved=u.filter(x=>x.approved!==false);
+  let html='';
+  if(pending.length&&CUR?.role==='admin'){
+    html+='<div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:6px">⏳ 待核可帳號（'+pending.length+'）</div>';
+    html+=pending.map(x=>`<div class="user-row" style="background:#FFF5F0;border:1px solid #F0D0C0;border-radius:8px;padding:8px;margin-bottom:4px"><span>👤</span><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">🏪 ${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span><button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;margin-left:auto" onclick="approveUser('${x.phone}')">✓ 核可</button><button class="user-del" onclick="delUser('${x.phone}')">✕</button></div>`).join('');
+    html+='<div style="margin:10px 0;border-top:1px solid #E4D9CC"></div>';
+  }
+  html+=approved.map(x=>`<div class="user-row"><span>👤</span><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">🏪 ${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${x.phone!==CUR?.phone&&CUR?.role==='admin'?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}</div>`).join('');
+  el('userList').innerHTML=html;
 }
 
 // ═══ SETTINGS ═══
@@ -598,12 +614,12 @@ function addMerchant(){
   const list=getMerchants();
   if(list.includes(name)){notify('此商家已存在',true);return}
   list.push(name);DB.set('merchants',list);
-  el('newMerchantName').value='';renderMerchants();refreshMerchantSelect();notify(`✅ 已新增商家「${name}」`);
+  el('newMerchantName').value='';renderMerchants();refreshMerchantSelect();populateNewBizSelect();populateRegMerchantSelect();notify(`✅ 已新增商家「${name}」`);
 }
 function delMerchant(i){
   const list=getMerchants();const name=list[i];
   if(!confirm(`確定要刪除商家「${name}」嗎？`))return;
-  list.splice(i,1);DB.set('merchants',list);renderMerchants();refreshMerchantSelect();notify('已刪除');
+  list.splice(i,1);DB.set('merchants',list);renderMerchants();refreshMerchantSelect();populateNewBizSelect();populateRegMerchantSelect();notify('已刪除');
 }
 
 // ═══ MERCHANT SELECT ═══
@@ -1070,7 +1086,7 @@ function executeCleanup(){
     hideProg();
     initAuth();
     // Session from localStorage (per-device)
-    try{const s=JSON.parse(localStorage.getItem('bread_session'));if(s&&s.phone&&(Date.now()-s.ts)<8*3600000){const u=(DB.get('users')||[]).find(x=>x.phone===s.phone);if(u){CUR=u;enterApp()}}}catch(e){}
+    try{const s=JSON.parse(localStorage.getItem('bread_session'));if(s&&s.phone&&(Date.now()-s.ts)<8*3600000){const u=(DB.get('users')||[]).find(x=>x.phone===s.phone);if(u&&u.approved!==false){CUR=u;enterApp()}}}catch(e){}
   }catch(e){
     hideProg();
     console.error('Firebase init failed:',e);
