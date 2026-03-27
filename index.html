@@ -7,6 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
 :root{--cream:#F7F3ED;--warm:#EDE5D8;--bread:#C8903C;--bread2:#A06E28;--crust:#5C3A1E;--dark:#2A1A0E;--muted:#8C7B6B;--light:#FAF7F3;--green:#3D6B4F;--green2:#2A4E38;--red:#8B2E2E;--white:#FEFCFA;--blue:#2B5797;--shadow:rgba(44,26,10,.13);--r:10px}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -329,6 +331,19 @@ tbody td{padding:8px 11px;vertical-align:top}
         <input type="file" id="restoreIn" accept=".json" class="hidden" onchange="restoreData(this)">
       </div>
     </div>
+    <div class="card hidden" id="cleanupCard">
+      <div class="card-title">🗑️ 清除舊訂單（管理者）</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.8">清除指定日期之前的訂單批次。清除前將自動產生備份檔案供下載。</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <label style="font-size:13px;font-weight:600">清除此日期之前的訂單：</label>
+        <input class="search-in" type="date" id="cleanupDate">
+      </div>
+      <div id="cleanupPreview" style="display:none;margin-bottom:12px;padding:12px;background:#FFF8E7;border-radius:8px;border:1px solid #E4D9CC"></div>
+      <div class="btn-row" style="margin-top:0">
+        <button class="btn btn-primary" onclick="previewCleanup()">🔍 預覽要清除的資料</button>
+        <button class="btn btn-red" id="confirmCleanBtn" onclick="executeCleanup()" style="display:none">⚠️ 確認清除</button>
+      </div>
+    </div>
     <div class="card" id="adminCard">
       <div class="card-title">👥 帳號管理（管理者）</div>
       <div class="user-list" id="userList"></div>
@@ -346,12 +361,48 @@ tbody td{padding:8px 11px;vertical-align:top}
 <div class="prog-wrap" id="prog"><div class="prog-toast"><div class="spin"></div><span id="prog-text">處理中…</span></div></div>
 
 <script>
-const el=id=>document.getElementById(id);
-const DB={
-  get(k,d=null){try{const v=localStorage.getItem('bread_'+k);return v?JSON.parse(v):d}catch{return d}},
-  set(k,v){try{localStorage.setItem('bread_'+k,JSON.stringify(v))}catch(e){console.error(e)}},
-  del(k){localStorage.removeItem('bread_'+k)}
+// ═══ FIREBASE CONFIG ═══
+const firebaseConfig={
+  apiKey:"AIzaSyBHqOMq358IBI4jt6f8gTb7l_0uZgbeGnc",
+  authDomain:"bread-group-buy.firebaseapp.com",
+  databaseURL:"https://bread-group-buy-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"bread-group-buy",
+  storageBucket:"bread-group-buy.firebasestorage.app",
+  messagingSenderId:"696736152138",
+  appId:"1:696736152138:web:a6498271297cf0743304b3"
 };
+
+const el=id=>document.getElementById(id);
+
+// ═══ FIREBASE-BACKED DB (cache + write-through) ═══
+let fbRef;
+const _cache={};
+const DB={
+  get(k,d=null){return _cache.hasOwnProperty(k)?JSON.parse(JSON.stringify(_cache[k])):d},
+  set(k,v){_cache[k]=v;if(fbRef)fbRef.child(k).set(v)},
+  del(k){delete _cache[k];if(fbRef)fbRef.child(k).remove()}
+};
+
+async function initFirebase(){
+  firebase.initializeApp(firebaseConfig);
+  fbRef=firebase.database().ref('bread');
+  const snap=await fbRef.once('value');
+  const data=snap.val()||{};
+  Object.assign(_cache,data);
+  // Real-time sync for cross-device updates
+  fbRef.on('value',snap=>{
+    const d=snap.val()||{};
+    Object.keys(_cache).forEach(k=>{if(!d.hasOwnProperty(k))delete _cache[k]});
+    Object.assign(_cache,d);
+  });
+}
+// Refresh data when user returns to tab
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState==='visible'&&fbRef&&CUR){
+    try{const snap=await fbRef.once('value');const d=snap.val()||{};Object.keys(_cache).forEach(k=>{if(!d.hasOwnProperty(k))delete _cache[k]});Object.assign(_cache,d);showAllBatches()}catch(e){console.warn('sync error',e)}
+  }
+});
+
 const RL={admin:'管理者',cs:'客服人員',merchant:'商家'};
 const RC={admin:'role-admin',cs:'role-cs',merchant:'role-merchant'};
 
@@ -372,7 +423,7 @@ function doLogin(){
   if(!u||!p){el('loginErr').textContent='請填入帳號和密碼';return}
   const users=DB.get('users')||[];const f=users.find(x=>x.phone===u&&x.password===p);
   if(!f){el('loginErr').textContent='帳號或密碼錯誤';return}
-  CUR=f;DB.set('session',{phone:u,role:f.role,ts:Date.now()});enterApp();
+  CUR=f;localStorage.setItem('bread_session',JSON.stringify({phone:u,role:f.role,ts:Date.now()}));enterApp();
 }
 function doRegister(){
   const phone=el('regPhone').value.trim(),pw=el('regPass').value,pw2=el('regPass2').value,role=el('regRole').value,nick=el('regNickname').value.trim(),biz=el('regBusiness').value.trim(),err=el('regErr');
@@ -381,20 +432,22 @@ function doRegister(){
   if(role==='merchant'&&!biz){err.textContent='商家請填商家名稱';return}
   const users=DB.get('users')||[];if(users.find(x=>x.phone===phone)){err.textContent='此電話已被註冊';return}
   users.push({phone,password:pw,role,nickname:nick,businessName:role==='merchant'?biz:'',createdAt:new Date().toLocaleString('zh-TW')});
-  DB.set('users',users);CUR=users[users.length-1];DB.set('session',{phone,role,ts:Date.now()});enterApp();notify('✅ 註冊成功！');
+  DB.set('users',users);CUR=users[users.length-1];localStorage.setItem('bread_session',JSON.stringify({phone,role,ts:Date.now()}));enterApp();notify('✅ 註冊成功！');
 }
 function enterApp(){
   el('loginScreen').classList.add('hidden');el('mainApp').classList.remove('hidden');
   el('userBadge').textContent=`👤 ${CUR.nickname}（${RL[CUR.role]}）${CUR.businessName?' · '+CUR.businessName:''}`;
   el('adminCard').classList.toggle('hidden',CUR.role!=='admin');
+  el('cleanupCard').classList.toggle('hidden',CUR.role!=='admin');
   // 商家角色：隱藏匯入和設定頁籤
   const isMerchant=CUR.role==='merchant';
   el('tab-import').classList.toggle('hidden',isMerchant);
   el('tab-settings').classList.toggle('hidden',isMerchant);
   if(isMerchant){switchTab('orders')}
   loadSettings();renderUsers();refreshMerchantSelect();showAllBatches();
+  if(CUR.role==='admin')checkAutoBackup();
 }
-function doLogout(){DB.del('session');CUR=null;el('mainApp').classList.add('hidden');el('loginScreen').classList.remove('hidden');showLogin();el('loginUser').value='';el('loginPass').value=''}
+function doLogout(){localStorage.removeItem('bread_session');CUR=null;el('mainApp').classList.add('hidden');el('loginScreen').classList.remove('hidden');showLogin();el('loginUser').value='';el('loginPass').value=''}
 el('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 function addUser(){
   if(!CUR||CUR.role!=='admin'){notify('權限不足',true);return}
@@ -904,9 +957,98 @@ function exportAll(){
 }
 function restoreData(inp){const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.settings)DB.set('settings',d.settings);if(d.batches)DB.set('batches',d.batches);if(d.users&&CUR?.role==='admin')DB.set('users',d.users);loadSettings();renderUsers();showAllBatches();notify('✅ 已還原')}catch{notify('格式錯誤',true)}};r.readAsText(inp.files[0]);inp.value=''}
 
-// ═══ INIT ═══
-initAuth();
-(function(){const s=DB.get('session');if(s&&s.phone&&(Date.now()-s.ts)<8*3600000){const u=(DB.get('users')||[]).find(x=>x.phone===s.phone);if(u){CUR=u;enterApp()}}})();
+// ═══ AUTO BACKUP ═══
+function checkAutoBackup(){
+  const lastBackup=DB.get('lastAutoBackup',0);
+  const now=Date.now();
+  if(now-lastBackup>24*3600*1000){
+    const data={version:3,exportedAt:new Date().toISOString(),settings:DB.get('settings',{}),batches:DB.get('batches',{}),users:DB.get('users',[])};
+    const dateKey=new Date().toISOString().slice(0,10);
+    fbRef.child('backups').child(dateKey).set(data);
+    DB.set('lastAutoBackup',now);
+    // 只保留最近30份備份
+    fbRef.child('backups').once('value').then(snap=>{
+      const bk=snap.val();if(bk){const keys=Object.keys(bk).sort();if(keys.length>30)keys.slice(0,keys.length-30).forEach(k=>fbRef.child('backups').child(k).remove())}
+    });
+    notify('📦 已自動備份今日資料');
+  }
+}
+
+// ═══ CLEANUP (清除舊訂單) ═══
+let _cleanupBackupDownloaded=false;
+function previewCleanup(){
+  const dateStr=el('cleanupDate').value;
+  if(!dateStr){notify('請選擇日期',true);return}
+  const batches=DB.get('batches',{});const toDelete=[];
+  for(const[id,b]of Object.entries(batches)){
+    const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);
+    const latest=dates.sort().pop()||'';
+    if(latest&&latest<dateStr)toDelete.push({id,batch:b,latestDate:latest});
+  }
+  if(!toDelete.length){notify('沒有符合條件的舊訂單',true);el('cleanupPreview').style.display='none';el('confirmCleanBtn').style.display='none';return}
+  const totalItems=toDelete.reduce((s,d)=>s+d.batch.items.length,0);
+  const totalQty=toDelete.reduce((s,d)=>s+d.batch.items.reduce((ss,r)=>ss+r.qty,0),0);
+  _cleanupBackupDownloaded=false;
+  el('cleanupPreview').innerHTML=`
+    <div style="font-size:14px;font-weight:700;color:var(--red);margin-bottom:8px">⚠️ 將清除以下資料：</div>
+    <div style="font-size:13px;line-height:2">
+      <div>• <strong>${toDelete.length}</strong> 個訂單批次</div>
+      <div>• <strong>${totalItems}</strong> 筆品項記錄（共 ${totalQty} 個麵包）</div>
+      <div>• 最晚取件日期在 <strong>${dateStr}</strong> 之前</div>
+    </div>
+    <div style="margin-top:12px;padding:10px;background:#FEF3F3;border:1px solid var(--red);border-radius:6px;font-size:13px;color:var(--red);font-weight:600">
+      ⚠️ 請先下載備份檔案，確認下載完成後再點擊「確認清除」
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-primary" onclick="downloadCleanupBackup()">⬇️ 下載備份檔案（Excel）</button>
+      <button class="btn btn-ghost btn-sm" onclick="downloadCleanupBackupJSON()">⬇️ 下載備份（JSON）</button>
+    </div>`;
+  el('cleanupPreview').style.display='block';el('confirmCleanBtn').style.display='inline-flex';
+  el('cleanupPreview').scrollIntoView({behavior:'smooth'});
+}
+function downloadCleanupBackup(){
+  const dateStr=el('cleanupDate').value;const batches=DB.get('batches',{});
+  const toDelete=Object.entries(batches).filter(([id,b])=>{const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);const latest=dates.sort().pop()||'';return latest&&latest<dateStr});
+  if(!toDelete.length)return;
+  try{
+    const wb=XLSX.utils.book_new();const allItems=[];
+    for(const[id,b]of toDelete)for(const item of b.items)allItems.push({批次ID:id,商家:b.merchant||'',匯入時間:b.savedAt||'',檔案名稱:b.fileName||'',訂單ID:item.oid,訂購人:item.buyer,取件人:item.person,地址:item.addr,取件時間:item.pickTime,備註:item.note,品項:item.itemName,單價:item.price,數量:item.qty,小計:item.subtotal});
+    const ws=XLSX.utils.json_to_sheet(allItems);XLSX.utils.book_append_sheet(wb,ws,'清除前備份');
+    dlBlob(xls2blob(wb),`清除備份_${dateStr}_${new Date().toLocaleDateString('zh-TW').replace(/\//g,'')}.xlsx`);
+    _cleanupBackupDownloaded=true;notify('✅ 備份已下載，確認完成後可點擊「確認清除」');
+  }catch(e){notify('備份下載失敗：'+e.message,true)}
+}
+function downloadCleanupBackupJSON(){
+  const dateStr=el('cleanupDate').value;const batches=DB.get('batches',{});const toDelete={};
+  for(const[id,b]of Object.entries(batches)){const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);const latest=dates.sort().pop()||'';if(latest&&latest<dateStr)toDelete[id]=b}
+  dlBlob(new Blob([JSON.stringify({version:3,type:'cleanup_backup',cleanupDate:dateStr,exportedAt:new Date().toISOString(),batches:toDelete},null,2)],{type:'application/json'}),`清除備份_${dateStr}.json`);
+  _cleanupBackupDownloaded=true;notify('✅ JSON 備份已下載');
+}
+function executeCleanup(){
+  if(!_cleanupBackupDownloaded){notify('⚠️ 請先下載備份檔案再進行清除！',true);return}
+  if(!confirm('確定要清除嗎？此操作無法復原！\n\n請確認您已經下載並保存了備份檔案。'))return;
+  const dateStr=el('cleanupDate').value;const batches=DB.get('batches',{});const newBatches={};let cnt=0;
+  for(const[id,b]of Object.entries(batches)){const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);const latest=dates.sort().pop()||'';if(latest&&latest<dateStr)cnt++;else newBatches[id]=b}
+  DB.set('batches',newBatches);
+  el('cleanupPreview').style.display='none';el('confirmCleanBtn').style.display='none';el('cleanupDate').value='';_cleanupBackupDownloaded=false;
+  notify(`✅ 已清除 ${cnt} 個舊訂單批次`);showAllBatches();
+}
+
+// ═══ INIT (Firebase async) ═══
+(async function(){
+  try{
+    showProg('連接雲端資料庫…');
+    await initFirebase();
+    hideProg();
+    initAuth();
+    // Session from localStorage (per-device)
+    try{const s=JSON.parse(localStorage.getItem('bread_session'));if(s&&s.phone&&(Date.now()-s.ts)<8*3600000){const u=(DB.get('users')||[]).find(x=>x.phone===s.phone);if(u){CUR=u;enterApp()}}}catch(e){}
+  }catch(e){
+    hideProg();
+    console.error('Firebase init failed:',e);
+    notify('⚠️ 雲端連線失敗，請檢查網路後重新整理',true);
+  }
+})();
 </script>
 </body>
 </html>
