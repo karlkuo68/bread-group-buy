@@ -87,26 +87,25 @@ tbody td{padding:8px 11px;vertical-align:top}
 .search-label{font-size:12px;color:var(--muted);font-weight:500}
 .search-in{padding:8px 12px;border:1.5px solid #D9CEBC;border-radius:7px;font-size:13px;background:var(--cream);color:var(--dark);font-family:'Noto Sans TC',sans-serif;min-width:0}
 .search-in:focus{outline:none;border-color:var(--bread)}
-.stk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
-@media(min-width:750px){.stk-grid{grid-template-columns:repeat(2,1fr)}}
-@media(min-width:1100px){.stk-grid{grid-template-columns:repeat(3,1fr)}}
+.stk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+@media(min-width:700px){.stk-grid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1050px){.stk-grid{grid-template-columns:repeat(3,1fr)}}
 .stk{border:1.5px solid #ccc;border-radius:4px;overflow:hidden;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.1);font-family:'Noto Sans TC',sans-serif;display:flex;flex-direction:column}
 .stk-top{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:2px solid #333;flex-shrink:0}
 .stk-store{font-weight:800;font-size:28px;color:#333;letter-spacing:1px}
 .stk-qr{width:64px;height:64px;object-fit:contain}
 .stk-qr-ph{width:64px;height:64px;border:1.5px dashed #bbb;display:flex;align-items:center;justify-content:center;font-size:11px;color:#aaa;border-radius:3px}
-.stk-person{padding:5px 10px;font-size:20px;font-weight:700;color:#333;border-bottom:1.5px solid #eee;flex-shrink:0;display:flex;justify-content:space-between;align-items:baseline}
-.stk-person-total{font-size:18px;font-weight:800;color:var(--bread)}
-.stk-info{padding:3px 10px;font-size:11px;color:#666;line-height:1.6;border-bottom:1px solid #eee;flex-shrink:0;display:flex;flex-wrap:wrap;gap:0 12px}
-.stk-info span{white-space:nowrap}
-.stk-info .info-full{white-space:normal;word-break:break-all;flex-basis:100%}
-.stk-note{padding:2px 10px 3px;font-size:10px;color:#c55;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;word-break:break-all}
+.stk-fields{padding:4px 10px;font-size:12px;line-height:1.8;border-bottom:1px solid #eee;flex-shrink:0}
+.sf-row{display:flex;gap:4px}.sf-label{color:#888;flex-shrink:0;min-width:52px}.sf-val{color:#333;font-weight:500;word-break:break-all}
+.sf-highlight .sf-val{font-weight:700;font-size:14px}
+.sf-total-row .sf-val{font-weight:700;color:var(--bread)}
+.stk-note{padding:2px 10px 3px;font-size:11px;color:#c55;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;word-break:break-all}
 .stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
 .stk-items{padding:2px 8px 4px;flex:1;overflow:hidden}
-.stk-item{padding:2px 0;font-size:13px;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
+.stk-item{padding:2px 0;font-size:12px;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
 .stk-item:last-child{border-bottom:none}
 .item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.item-pq{font-family:'DM Mono',monospace;font-size:12px;color:#555;white-space:nowrap;text-align:right}
+.item-pq{font-family:'DM Mono',monospace;font-size:11px;color:#555;white-space:nowrap;text-align:right}
 .pk-section{margin-bottom:20px;border-radius:var(--r);overflow:hidden;border:1px solid #E4D9CC;box-shadow:0 2px 8px var(--shadow)}
 .pk-hdr{background:var(--crust);color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .pk-hdr-name{font-size:14px;font-weight:700;font-family:'Noto Serif TC',serif}
@@ -884,8 +883,8 @@ function stkHTML(pg){
   const note=pg.note||'';
   const bagInfo=pg.totalBags>1?` （${pg.bagNo}/${pg.totalBags}袋）`:'';
   const bagLabel=pg.bagLabel?` [${pg.bagLabel}]`:'';
-  const pTotal=pg.personTotal!=null?`<span class="stk-person-total">$${pg.personTotal.toLocaleString()}</span>`:'';
-  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-person"><span>👤 ${pg.person}${bagInfo}</span>${pTotal}</div><div class="stk-info"><span>📋 ${pg.oid}</span><span>🕐 ${pg.pickTime||'—'}</span><span class="info-full">📍 ${pg.addr||'—'}</span></div>${note?`<div class="stk-note">📌 ${note}</div>`:''}<div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div></div>`;
+  const pTotalRow=pg.personTotal!=null?`<div class="sf-row sf-total-row"><span class="sf-label">訂購總額</span><span class="sf-val">$${pg.personTotal.toLocaleString()}</span></div>`:'';
+  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div>${note?`<div class="stk-note">備註：${note}</div>`:''}<div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div></div>`;
 }
 function showStickers(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -971,18 +970,17 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 .stk-store{font-weight:800;font-size:28px;color:#333;letter-spacing:1px}
 .stk-qr{width:64px;height:64px;object-fit:contain}
 .stk-qr-ph{width:64px;height:64px;border:1.5px dashed #bbb;display:flex;align-items:center;justify-content:center;font-size:11px;color:#aaa;border-radius:3px}
-.stk-person{padding:5px 10px;font-size:20px;font-weight:700;color:#333;border-bottom:1.5px solid #eee;flex-shrink:0;display:flex;justify-content:space-between;align-items:baseline}
-.stk-person-total{font-size:18px;font-weight:800;color:#b5651d}
-.stk-info{padding:3px 10px;font-size:11px;color:#666;line-height:1.6;border-bottom:1px solid #eee;flex-shrink:0;display:flex;flex-wrap:wrap;gap:0 12px}
-.stk-info span{white-space:nowrap}
-.stk-info .info-full{white-space:normal;word-break:break-all;flex-basis:100%}
-.stk-note{padding:2px 10px 3px;font-size:10px;color:#c55;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;word-break:break-all}
+.stk-fields{padding:4px 10px;font-size:12px;line-height:1.8;border-bottom:1px solid #eee;flex-shrink:0}
+.sf-row{display:flex;gap:4px}.sf-label{color:#888;flex-shrink:0;min-width:52px}.sf-val{color:#333;font-weight:500;word-break:break-all}
+.sf-highlight .sf-val{font-weight:700;font-size:14px}
+.sf-total-row .sf-val{font-weight:700;color:#b5651d}
+.stk-note{padding:2px 10px 3px;font-size:11px;color:#c55;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;word-break:break-all}
 .stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
 .stk-items{padding:2px 8px 4px;flex:1;overflow:hidden}
-.stk-item{padding:2px 0;font-size:13px;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
+.stk-item{padding:2px 0;font-size:12px;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
 .stk-item:last-child{border-bottom:none}
 .item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.item-pq{font-family:'DM Mono',monospace;font-size:12px;color:#555;white-space:nowrap;text-align:right}
+.item-pq{font-family:'DM Mono',monospace;font-size:11px;color:#555;white-space:nowrap;text-align:right}
 @media print{@page{size:80mm 100mm;margin:0}.stk{box-shadow:none!important;border-radius:0!important;border:none!important;margin:0!important;width:80mm!important;height:100mm!important;page-break-after:always}}
 </style></head><body>${html}
 <script>window.onafterprint=function(){window.close()};setTimeout(function(){window.print()},600);<\/script>
