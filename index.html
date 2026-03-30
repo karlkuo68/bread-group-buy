@@ -578,8 +578,10 @@ function parseOrders(data){
     const itemStr=cln(r[C.item]);if(!itemStr)continue;
     const m=itemStr.match(/^(.+?)\s*\$(\d+)\s*x(\d+)(.*)/);if(!m)continue;
     const itemName=m[1].trim(),price=+m[2],qty=+m[3],extra=m[4];
-    const pm=extra.match(/\[([^\]]+)\]/);const buyer=cln(r[C.buyer]);
-    items.push({oid,buyer,person:pm?pm[1]:buyer,addr:cln(r[C.addr]),pickTime:fmtD(r[C.ptime])||fmtD(r[C.otime])||'',note:cln(r[C.note])||cln(r[C.remark]),itemName,price,qty,subtotal:price*qty});
+    // 支援兩種取件人格式：[名字] 或 (訂購人: 名字)
+    const pm=extra.match(/\[([^\]]+)\]/)||extra.match(/\(訂購人:\s*([^)]+)\)/);
+    const buyer=cln(r[C.buyer]);
+    items.push({oid,buyer,person:pm?pm[1].trim():buyer,addr:cln(r[C.addr]),pickTime:fmtD(r[C.ptime])||fmtD(r[C.otime])||'',note:cln(r[C.note])||cln(r[C.remark]),itemName,price,qty,subtotal:price*qty});
   }
   G.items=items;
   if(!items.length){notify('沒有解析到品項',true);return}
