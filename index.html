@@ -146,7 +146,7 @@ tbody td{padding:8px 11px;vertical-align:top}
 .user-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
 .user-row{background:var(--warm);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap}
 .user-role{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700}
-.role-admin{background:#5C3A1E;color:#fff}.role-cs{background:var(--blue);color:#fff}.role-merchant{background:var(--green);color:#fff}
+.role-owner{background:#8B0000;color:#fff}.role-admin{background:#5C3A1E;color:#fff}.role-cs{background:var(--blue);color:#fff}.role-merchant{background:var(--green);color:#fff}
 .user-del{margin-left:auto;background:none;border:none;cursor:pointer;color:var(--red);padding:3px 8px;border-radius:4px;font-size:13px}
 .select-in{padding:8px 10px;border:1.5px solid #D9CEBC;border-radius:6px;font-size:13px;background:var(--cream);color:var(--dark);font-family:'Noto Sans TC',sans-serif}
 .history-item{background:var(--white);border:1px solid #E4D9CC;border-radius:8px;padding:12px 14px;transition:all .2s;display:flex;align-items:flex-start;gap:12px;margin-bottom:8px}
@@ -416,8 +416,9 @@ document.addEventListener('visibilitychange',async()=>{
   }
 });
 
-const RL={admin:'管理者',cs:'客服人員',merchant:'商家'};
-const RC={admin:'role-admin',cs:'role-cs',merchant:'role-merchant'};
+const RL={owner:'負責人',admin:'管理者',cs:'客服人員',merchant:'商家'};
+const RC={owner:'role-owner',admin:'role-admin',cs:'role-cs',merchant:'role-merchant'};
+function isAdmin(r){return r==='admin'||r==='owner'}
 
 // ═══ AUTH ═══
 let CUR=null;
@@ -425,7 +426,8 @@ function initAuth(){
   let u=DB.get('users');if(!u)u=[];
   u=u.map(x=>{if(x.username&&!x.phone){x.phone=x.username;delete x.username}if(!x.nickname)x.nickname=x.phone||'';if(!x.businessName)x.businessName='';if(!x.role||x.role==='user')x.role='cs';if(x.approved===undefined)x.approved=true;return x});
   u=u.filter(x=>x.phone!=='admin');
-  if(!u.find(x=>x.phone==='0988789356'))u.push({phone:'0988789356',password:'123123',role:'admin',nickname:'管理者',businessName:'',approved:true,createdAt:new Date().toLocaleString('zh-TW')});
+  const owner=u.find(x=>x.phone==='0988789356');
+  if(owner){owner.role='owner'}else{u.push({phone:'0988789356',password:'123123',role:'owner',nickname:'負責人',businessName:'',approved:true,createdAt:new Date().toLocaleString('zh-TW')})}
   DB.set('users',u);
 }
 function showRegister(){el('loginForm').classList.add('hidden');el('registerForm').classList.remove('hidden');el('authSubtitle').textContent='註冊新帳號';populateRegMerchantSelect();toggleRegFields()}
@@ -453,20 +455,20 @@ function doRegister(){
 function enterApp(){
   el('loginScreen').classList.add('hidden');el('mainApp').classList.remove('hidden');
   el('userBadge').textContent=`👤 ${CUR.nickname}（${RL[CUR.role]}）${CUR.businessName?' · '+CUR.businessName:''}`;
-  el('adminCard').classList.toggle('hidden',CUR.role!=='admin');
-  el('cleanupCard').classList.toggle('hidden',CUR.role!=='admin');
+  el('adminCard').classList.toggle('hidden',!isAdmin(CUR.role));
+  el('cleanupCard').classList.toggle('hidden',!isAdmin(CUR.role));
   // 商家角色：隱藏匯入和設定頁籤
   const isMerchant=CUR.role==='merchant';
   el('tab-import').classList.toggle('hidden',isMerchant);
   el('tab-settings').classList.toggle('hidden',isMerchant);
   if(isMerchant){switchTab('orders')}
   loadSettings();renderUsers();refreshMerchantSelect();populateNewBizSelect();showAllBatches();
-  if(CUR.role==='admin')checkAutoBackup();
+  if(isAdmin(CUR.role))checkAutoBackup();
 }
 function doLogout(){localStorage.removeItem('bread_session');CUR=null;el('mainApp').classList.add('hidden');el('loginScreen').classList.remove('hidden');showLogin();el('loginUser').value='';el('loginPass').value=''}
 el('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 function addUser(){
-  if(!CUR||CUR.role!=='admin'){notify('權限不足',true);return}
+  if(!CUR||!isAdmin(CUR.role)){notify('權限不足',true);return}
   const phone=el('newPhone').value.trim(),pw=el('newPw').value.trim(),rl=el('newRole').value,nick=el('newNick').value.trim(),biz=el('newBiz').value.trim();
   if(!phone||!pw){notify('電話和密碼不可空白',true);return}if(!nick){notify('請填暱稱',true);return}
   if(rl==='merchant'&&!biz){notify('商家需填商家名稱',true);return}
@@ -477,6 +479,8 @@ function addUser(){
 function delUser(p){if(p===CUR.phone){notify('不能刪除自己',true);return}DB.set('users',(DB.get('users')||[]).filter(x=>x.phone!==p));renderUsers();notify('已刪除')}
 function approveUser(p){
   const users=DB.get('users')||[];const f=users.find(x=>x.phone===p);if(!f)return;
+  // 管理者帳號只能由負責人核可
+  if(f.role==='admin'&&CUR.role!=='owner'){notify('管理者帳號需由負責人核可',true);return}
   f.approved=true;DB.set('users',users);renderUsers();notify(`✅ 已核可「${f.nickname}」`);
 }
 function renderUsers(){
@@ -484,12 +488,23 @@ function renderUsers(){
   const pending=u.filter(x=>x.approved===false);
   const approved=u.filter(x=>x.approved!==false);
   let html='';
-  if(pending.length&&CUR?.role==='admin'){
-    html+='<div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:6px">⏳ 待核可帳號（'+pending.length+'）</div>';
-    html+=pending.map(x=>`<div class="user-row" style="background:#FFF5F0;border:1px solid #F0D0C0;border-radius:8px;padding:8px;margin-bottom:4px"><span>👤</span><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">🏪 ${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span><button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;margin-left:auto" onclick="approveUser('${x.phone}')">✓ 核可</button><button class="user-del" onclick="delUser('${x.phone}')">✕</button></div>`).join('');
-    html+='<div style="margin:10px 0;border-top:1px solid #E4D9CC"></div>';
+  if(pending.length&&isAdmin(CUR?.role)){
+    // 管理者只能看到非admin的待核可；負責人看到全部
+    const visiblePending=CUR.role==='owner'?pending:pending.filter(x=>x.role!=='admin');
+    const adminPending=pending.filter(x=>x.role==='admin');
+    if(visiblePending.length){
+      html+='<div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:6px">⏳ 待核可帳號（'+visiblePending.length+'）</div>';
+      html+=visiblePending.map(x=>`<div class="user-row" style="background:#FFF5F0;border:1px solid #F0D0C0;border-radius:8px;padding:8px;margin-bottom:4px"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span><button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;margin-left:auto" onclick="approveUser('${x.phone}')">✓ 核可</button><button class="user-del" onclick="delUser('${x.phone}')">✕</button></div>`).join('');
+      html+='<div style="margin:10px 0;border-top:1px solid #E4D9CC"></div>';
+    }
+    if(adminPending.length&&CUR.role!=='owner'){
+      html+='<div style="font-size:11px;color:var(--muted);margin-bottom:8px">另有 '+adminPending.length+' 個管理者帳號待負責人核可</div>';
+    }
   }
-  html+=approved.map(x=>`<div class="user-row"><span>👤</span><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">🏪 ${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${x.phone!==CUR?.phone&&CUR?.role==='admin'?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}</div>`).join('');
+  html+=approved.map(x=>{
+    const canDel=isAdmin(CUR?.role)&&x.phone!==CUR?.phone&&x.role!=='owner';
+    return`<div class="user-row"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${canDel?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}`;
+  }).join('');
   el('userList').innerHTML=html;
 }
 
@@ -1034,7 +1049,7 @@ function exportAll(){
   const data={version:3,exportedAt:new Date().toISOString(),settings:DB.get('settings',{}),batches:DB.get('batches',{}),users:(DB.get('users',[])).map(u=>({phone:u.phone,role:u.role,password:u.password,nickname:u.nickname,businessName:u.businessName}))};
   dlBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`麵包團購備份_${new Date().toLocaleDateString('zh-TW').replace(/\//g,'')}.json`);notify('✅ 備份完成');
 }
-function restoreData(inp){const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.settings)DB.set('settings',d.settings);if(d.batches)DB.set('batches',d.batches);if(d.users&&CUR?.role==='admin')DB.set('users',d.users);loadSettings();renderUsers();showAllBatches();notify('✅ 已還原')}catch{notify('格式錯誤',true)}};r.readAsText(inp.files[0]);inp.value=''}
+function restoreData(inp){const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.settings)DB.set('settings',d.settings);if(d.batches)DB.set('batches',d.batches);if(d.users&&isAdmin(CUR?.role))DB.set('users',d.users);loadSettings();renderUsers();showAllBatches();notify('✅ 已還原')}catch{notify('格式錯誤',true)}};r.readAsText(inp.files[0]);inp.value=''}
 
 // ═══ AUTO BACKUP ═══
 function checkAutoBackup(){
