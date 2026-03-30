@@ -7,7 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
@@ -944,33 +943,36 @@ function dlExportItems(items,fn){
   }catch(e){notify('Excel 匯出失敗：'+e.message,true);console.error(e)}
 }
 
-// PDF 貼紙（html2canvas 方式，支援中文）
-async function dlPDF(items){
+// PDF 貼紙（開啟列印視窗，瀏覽器原生列印，完美支援中文）
+function dlPDF(items){
   if(!items||!items.length){notify('請先搜尋',true);return}
   const stk=buildStickers(items);if(!stk.length){notify('無資料',true);return}
-  showProg('生成 PDF（共 '+stk.length+' 張）…');
-  try{
-    const{jsPDF}=window.jspdf;const W=80,H=100;
-    const doc=new jsPDF({unit:'mm',format:[W,H]});
-    // 建立暫存容器渲染貼紙 HTML
-    const wrap=document.createElement('div');
-    wrap.style.cssText='position:fixed;left:-9999px;top:0;width:302px;background:#fff;font-family:"Noto Sans TC",sans-serif';
-    document.body.appendChild(wrap);
-    for(let i=0;i<stk.length;i++){
-      if(i>0)doc.addPage([W,H]);
-      wrap.innerHTML=stkHTML(stk[i]);
-      const stkEl=wrap.firstChild;
-      stkEl.style.cssText='width:302px;padding:10px 12px;box-sizing:border-box;background:#fff;font-family:"Noto Sans TC",sans-serif';
-      await document.fonts.ready;
-      const canvas=await html2canvas(wrap,{scale:3,useCORS:true,backgroundColor:'#ffffff',width:302});
-      const imgData=canvas.toDataURL('image/png');
-      const ratio=canvas.height/canvas.width;
-      const imgW=W;const imgH=imgW*ratio;
-      doc.addImage(imgData,'PNG',0,0,imgW,Math.min(imgH,H));
-    }
-    document.body.removeChild(wrap);
-    doc.save('RT貼紙.pdf');hideProg();notify('✅ PDF 完成');
-  }catch(e){hideProg();notify('PDF 失敗：'+e.message,true);console.error(e)}
+  const html=stk.map(stkHTML).join('');
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RT貼紙列印</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
+.stk{width:80mm;border:1.5px solid #333;border-radius:4px;overflow:hidden;background:#fff;font-family:'Noto Sans TC',sans-serif;page-break-after:always;margin:0 auto 10px}
+.stk-top{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1.5px solid #333}
+.stk-store{font-weight:700;font-size:15px;color:#333}
+.stk-qr{width:40px;height:40px;object-fit:contain}
+.stk-qr-ph{width:40px;height:40px;border:1px dashed #ccc;display:flex;align-items:center;justify-content:center;font-size:8px;color:#aaa}
+.stk-fields{padding:6px 12px;font-size:12px;line-height:1.9;border-bottom:1px solid #eee}
+.sf-row{display:flex;gap:4px}.sf-label{color:#888;flex-shrink:0;min-width:42px}.sf-val{color:#333;font-weight:500;word-break:break-all}
+.stk-count{text-align:center;font-size:11px;color:#999;padding:4px 0;border-bottom:1px solid #eee}
+.stk-sep{text-align:center;font-size:11px;color:#666;padding:3px 0;letter-spacing:4px}
+.stk-items{padding:4px 12px 8px}
+.stk-item{padding:3px 0;font-size:13px;border-bottom:1px dashed #eee;display:flex;gap:6px}
+.stk-item:last-child{border-bottom:none}
+.stk-item .sq{font-family:'DM Mono',monospace;font-weight:700;color:#333;min-width:34px;font-size:12px}
+@media print{@page{size:80mm auto;margin:2mm}.stk{box-shadow:none!important;margin:0!important;page-break-after:always}}
+</style></head><body>${html}
+<script>window.onafterprint=function(){window.close()};setTimeout(function(){window.print()},600);<\/script>
+</body></html>`);
+  win.document.close();
+  notify('📄 列印視窗已開啟，請選擇「儲存為 PDF」');
 }
 
 // 分裝表 Excel（4頁工作表）
