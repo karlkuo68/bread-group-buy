@@ -103,6 +103,7 @@ tbody td{padding:8px 11px;vertical-align:top}
 .stk-item{padding:3px 0;font-size:13px;border-bottom:1px dashed #eee;display:flex;gap:6px}
 .stk-item:last-child{border-bottom:none}
 .stk-item .sq{font-family:'DM Mono',monospace;font-weight:700;color:#333;min-width:34px;font-size:12px}
+.stk-price{font-family:'DM Mono',monospace;font-size:11px;color:#888;flex-shrink:0;text-align:right}
 .pk-section{margin-bottom:20px;border-radius:var(--r);overflow:hidden;border:1px solid #E4D9CC;box-shadow:0 2px 8px var(--shadow)}
 .pk-hdr{background:var(--crust);color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .pk-hdr-name{font-size:14px;font-weight:700;font-family:'Noto Serif TC',serif}
@@ -872,11 +873,12 @@ function buildStickers(items){
 }
 function stkHTML(pg){
   const tQ=pg.bagItems.reduce((s,r)=>s+r.qty,0);
+  const tAmt=pg.bagItems.reduce((s,r)=>s+(r.price||0)*r.qty,0);
   const qr=G.qrBase64?`<img class="stk-qr" src="${G.qrBase64}">`:`<div class="stk-qr-ph">QR</div>`;
   const note=pg.note?(pg.note.length>20?pg.note.slice(0,20)+'…':pg.note):'';
   const bagInfo=pg.totalBags>1?` （第${pg.bagNo}/${pg.totalBags}袋）`:'';
   const bagLabel=pg.bagLabel?` <span style="font-size:11px;color:var(--bread);font-weight:600">[${pg.bagLabel}]</span>`:'';
-  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單ID</span><span class="sf-val">|  ${pg.oid}</span></div><div class="sf-row"><span class="sf-label">取件人</span><span class="sf-val">|  ${pg.person}${bagInfo}</span></div><div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">|  ${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件</span><span class="sf-val">|  ${pg.pickTime||'—'}</span></div>${note?`<div class="sf-row"><span class="sf-label">備註</span><span class="sf-val">|  ${note}</span></div>`:''}</div><div class="stk-count">共${tQ}個${bagLabel}</div><div class="stk-sep">── 品項 ──</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="sq">[${r.qty}]</span>${r.name}</div>`).join('')}</div></div>`;
+  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單ID</span><span class="sf-val">|  ${pg.oid}</span></div><div class="sf-row"><span class="sf-label">取件人</span><span class="sf-val">|  ${pg.person}${bagInfo}</span></div><div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">|  ${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件</span><span class="sf-val">|  ${pg.pickTime||'—'}</span></div>${note?`<div class="sf-row"><span class="sf-label">備註</span><span class="sf-val">|  ${note}</span></div>`:''}</div><div class="stk-count">共${tQ}個 · $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-sep">── 品項 ──</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="sq">[${r.qty}]</span><span style="flex:1">${r.name}</span><span class="stk-price">$${r.price||0}</span></div>`).join('')}</div></div>`;
 }
 function showStickers(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -888,8 +890,8 @@ function showStickers(items){
 // ═══ PACKING ═══
 function getSugBags(items){
   const used=new Array(items.length).fill(false),bags=[];
-  for(const rule of G.rules){const matched=[];items.forEach((r,i)=>{if(!used[i]&&rule.keywords.some(kw=>r.itemName.includes(kw.trim())))matched.push(i)});if(!matched.length)continue;let batch=[],bQ=0;for(const idx of matched){let rem=items[idx].qty;while(rem>0){const take=Math.min(rem,G.bagCap-bQ);batch.push({name:items[idx].itemName,qty:take});bQ+=take;rem-=take;if(bQ>=G.bagCap){bags.push({label:rule.label,contents:batch});batch=[];bQ=0}}used[idx]=true}if(batch.length)bags.push({label:rule.label,contents:batch})}
-  let bag=[],bQ=0;items.forEach((r,i)=>{if(used[i])return;let rem=r.qty;while(rem>0){const take=Math.min(rem,G.bagCap-bQ);bag.push({name:r.itemName,qty:take});bQ+=take;rem-=take;if(bQ>=G.bagCap){bags.push({label:'',contents:bag});bag=[];bQ=0}}});if(bag.length)bags.push({label:'',contents:bag});return bags;
+  for(const rule of G.rules){const matched=[];items.forEach((r,i)=>{if(!used[i]&&rule.keywords.some(kw=>r.itemName.includes(kw.trim())))matched.push(i)});if(!matched.length)continue;let batch=[],bQ=0;for(const idx of matched){let rem=items[idx].qty;while(rem>0){const take=Math.min(rem,G.bagCap-bQ);batch.push({name:items[idx].itemName,qty:take,price:items[idx].price});bQ+=take;rem-=take;if(bQ>=G.bagCap){bags.push({label:rule.label,contents:batch});batch=[];bQ=0}}used[idx]=true}if(batch.length)bags.push({label:rule.label,contents:batch})}
+  let bag=[],bQ=0;items.forEach((r,i)=>{if(used[i])return;let rem=r.qty;while(rem>0){const take=Math.min(rem,G.bagCap-bQ);bag.push({name:r.itemName,qty:take,price:r.price});bQ+=take;rem-=take;if(bQ>=G.bagCap){bags.push({label:'',contents:bag});bag=[];bQ=0}}});if(bag.length)bags.push({label:'',contents:bag});return bags;
 }
 function showPacking(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -970,6 +972,7 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 .stk-item{padding:2px 0;font-size:12px;border-bottom:1px dashed #eee;display:flex;gap:5px}
 .stk-item:last-child{border-bottom:none}
 .stk-item .sq{font-family:'DM Mono',monospace;font-weight:700;color:#333;min-width:30px;font-size:11px}
+.stk-price{font-family:'DM Mono',monospace;font-size:10px;color:#888;flex-shrink:0;text-align:right}
 @media print{@page{size:80mm 100mm;margin:0}.stk{box-shadow:none!important;border-radius:0!important;border:none!important;margin:0!important;width:80mm!important;height:100mm!important;page-break-after:always}}
 </style></head><body>${html}
 <script>window.onafterprint=function(){window.close()};setTimeout(function(){window.print()},600);<\/script>
