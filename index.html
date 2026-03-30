@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
@@ -848,18 +849,32 @@ function dlGrandTotalExcel(){
 
 // ═══ STICKERS ═══
 function buildStickers(items){
-  const IPP=G.ipp,groups=groupOP(items),stk=[];
+  // 依訂單+取件人分組，再依建議分袋，每袋一張貼紙
+  const groups=groupOP(items),stk=[];
   for(const[,rows]of Object.entries(groups)){
-    const r0=rows[0],tot=rows.reduce((s,r)=>s+r.subtotal,0),pages=Math.ceil(rows.length/IPP);
-    for(let p=0;p<pages;p++)stk.push({oid:r0.oid,person:r0.person,addr:r0.addr,pickTime:r0.pickTime,note:r0.note,items:rows.slice(p*IPP,(p+1)*IPP),subtotal:tot,pageNo:p+1,totalPages:pages});
+    const r0=rows[0];
+    const bags=getSugBags(rows);
+    if(!bags.length){
+      // 沒有品項時不產生貼紙
+      continue;
+    }
+    bags.forEach((bag,bi)=>{
+      stk.push({
+        oid:r0.oid,person:r0.person,addr:r0.addr,pickTime:r0.pickTime,note:r0.note,
+        bagItems:bag.contents, bagLabel:bag.label,
+        bagNo:bi+1, totalBags:bags.length
+      });
+    });
   }
   return stk;
 }
 function stkHTML(pg){
-  const tQ=pg.items.reduce((s,r)=>s+r.qty,0);
+  const tQ=pg.bagItems.reduce((s,r)=>s+r.qty,0);
   const qr=G.qrBase64?`<img class="stk-qr" src="${G.qrBase64}">`:`<div class="stk-qr-ph">QR</div>`;
   const note=pg.note?(pg.note.length>20?pg.note.slice(0,20)+'…':pg.note):'';
-  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單ID</span><span class="sf-val">|  ${pg.oid}</span></div><div class="sf-row"><span class="sf-label">訂購人</span><span class="sf-val">|  ${pg.person}</span></div><div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">|  ${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件</span><span class="sf-val">|  ${pg.pickTime||'—'}</span></div>${note?`<div class="sf-row"><span class="sf-label">備註</span><span class="sf-val">|  ${note}</span></div>`:''}</div><div class="stk-count">共${tQ}項</div><div class="stk-sep">── 品項 ──</div><div class="stk-items">${pg.items.map(r=>`<div class="stk-item"><span class="sq">[${r.qty}]</span>${r.itemName}</div>`).join('')}</div></div>`;
+  const bagInfo=pg.totalBags>1?` （第${pg.bagNo}/${pg.totalBags}袋）`:'';
+  const bagLabel=pg.bagLabel?` <span style="font-size:11px;color:var(--bread);font-weight:600">[${pg.bagLabel}]</span>`:'';
+  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單ID</span><span class="sf-val">|  ${pg.oid}</span></div><div class="sf-row"><span class="sf-label">取件人</span><span class="sf-val">|  ${pg.person}${bagInfo}</span></div><div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">|  ${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件</span><span class="sf-val">|  ${pg.pickTime||'—'}</span></div>${note?`<div class="sf-row"><span class="sf-label">備註</span><span class="sf-val">|  ${note}</span></div>`:''}</div><div class="stk-count">共${tQ}個${bagLabel}</div><div class="stk-sep">── 品項 ──</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="sq">[${r.qty}]</span>${r.name}</div>`).join('')}</div></div>`;
 }
 function showStickers(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -929,29 +944,33 @@ function dlExportItems(items,fn){
   }catch(e){notify('Excel 匯出失敗：'+e.message,true);console.error(e)}
 }
 
-// PDF 貼紙
-function dlPDF(items){
+// PDF 貼紙（html2canvas 方式，支援中文）
+async function dlPDF(items){
   if(!items||!items.length){notify('請先搜尋',true);return}
   const stk=buildStickers(items);if(!stk.length){notify('無資料',true);return}
-  showProg('生成 PDF…');
-  setTimeout(()=>{try{
-    const{jsPDF}=window.jspdf;const W=80,H=100;const doc=new jsPDF({unit:'mm',format:[W,H]});doc.setFont('helvetica');
-    const qr=G.qrBase64||null;
-    stk.forEach((pg,idx)=>{
-      if(idx>0)doc.addPage([W,H]);const LM=3,RM=W-3;let y=3;const tQ=pg.items.reduce((s,r)=>s+r.qty,0);
-      doc.setFontSize(13);doc.setFont('helvetica','bold');doc.setTextColor(51);doc.text(G.storeName,LM,y+5);
-      if(qr){try{doc.addImage(qr,'PNG',RM-13,y-1,13,13)}catch(e){}}
-      y+=14;doc.setDrawColor(51);doc.setLineWidth(0.4);doc.line(LM,y,RM,y);y+=2;
-      doc.setFontSize(8);doc.setFont('helvetica','normal');
-      const fields=[['訂單ID',pg.oid],['訂購人',pg.person],['地址',(pg.addr||'—').slice(0,28)],['取件',(pg.pickTime||'—').slice(0,24)]];
-      if(pg.note)fields.push(['備註',pg.note.length>22?pg.note.slice(0,22)+'…':pg.note]);
-      for(const[l,v]of fields){y+=5;doc.setTextColor(120);doc.text(l,LM,y);doc.setTextColor(0);doc.text('|  '+v,LM+14,y)}
-      y+=6;doc.setFontSize(7.5);doc.setTextColor(140);doc.text(`共${tQ}項`,W/2,y,{align:'center'});y+=4;
-      doc.setFontSize(8);doc.setTextColor(80);doc.text('──── 品項 ────',W/2,y,{align:'center'});y+=4;
-      doc.setTextColor(0);pg.items.forEach(it=>{doc.setFontSize(9);doc.setFont('helvetica','bold');doc.text(`[${it.qty}]`,LM+1,y);doc.setFont('helvetica','normal');doc.text(it.itemName,LM+13,y,{maxWidth:60});y+=5.5});
-    });
+  showProg('生成 PDF（共 '+stk.length+' 張）…');
+  try{
+    const{jsPDF}=window.jspdf;const W=80,H=100;
+    const doc=new jsPDF({unit:'mm',format:[W,H]});
+    // 建立暫存容器渲染貼紙 HTML
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:fixed;left:-9999px;top:0;width:302px;background:#fff;font-family:"Noto Sans TC",sans-serif';
+    document.body.appendChild(wrap);
+    for(let i=0;i<stk.length;i++){
+      if(i>0)doc.addPage([W,H]);
+      wrap.innerHTML=stkHTML(stk[i]);
+      const stkEl=wrap.firstChild;
+      stkEl.style.cssText='width:302px;padding:10px 12px;box-sizing:border-box;background:#fff;font-family:"Noto Sans TC",sans-serif';
+      await document.fonts.ready;
+      const canvas=await html2canvas(wrap,{scale:3,useCORS:true,backgroundColor:'#ffffff',width:302});
+      const imgData=canvas.toDataURL('image/png');
+      const ratio=canvas.height/canvas.width;
+      const imgW=W;const imgH=imgW*ratio;
+      doc.addImage(imgData,'PNG',0,0,imgW,Math.min(imgH,H));
+    }
+    document.body.removeChild(wrap);
     doc.save('RT貼紙.pdf');hideProg();notify('✅ PDF 完成');
-  }catch(e){hideProg();notify('PDF 失敗：'+e.message,true);console.error(e)}},30);
+  }catch(e){hideProg();notify('PDF 失敗：'+e.message,true);console.error(e)}
 }
 
 // 分裝表 Excel（4頁工作表）
