@@ -540,7 +540,7 @@ function renderUsers(){
   }
   html+=approved.map(x=>{
     const canDel=isAdmin(CUR?.role)&&x.phone!==CUR?.phone&&x.role!=='owner';
-    return`<div class="user-row"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${canDel?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}`;
+    return`<div class="user-row"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${canDel?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}</div>`;
   }).join('');
   el('userList').innerHTML=html;
 }
