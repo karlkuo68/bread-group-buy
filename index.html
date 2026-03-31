@@ -229,6 +229,7 @@ tbody td{padding:8px 11px;vertical-align:top}
   <div class="tabs">
     <div class="tab active" onclick="switchTab('import')" id="tab-import">① 匯入訂單</div>
     <div class="tab" onclick="switchTab('orders')" id="tab-orders">📋 訂單查詢</div>
+    <div class="tab" onclick="switchTab('recon')" id="tab-recon">💰 對帳作業</div>
     <div class="tab" onclick="switchTab('settings')" id="tab-settings">⚙️ 設定</div>
   </div>
 
@@ -304,6 +305,42 @@ tbody td{padding:8px 11px;vertical-align:top}
     <div id="stickerPanel" class="hidden"><div class="sub-panel"><div class="sub-panel-title">🏷️ 貼紙預覽 <span id="stkLabel"></span><button class="sub-panel-close" onclick="el('stickerPanel').classList.add('hidden')">✕ 關閉</button></div><div class="stk-grid" id="stkGrid"></div></div></div>
     <div id="packPanel" class="hidden"><div class="sub-panel"><div class="sub-panel-title">📦 分裝表預覽<button class="sub-panel-close" onclick="el('packPanel').classList.add('hidden')">✕ 關閉</button></div><div id="packContent"></div></div></div>
     <div id="grandTotalPanel" class="hidden"><div class="sub-panel"><div class="sub-panel-title">📊 查詢日期總準備量<button class="sub-panel-close" onclick="el('grandTotalPanel').classList.add('hidden')">✕ 關閉</button></div><div id="grandTotalContent"></div></div></div>
+  </div>
+
+  <!-- 對帳作業 -->
+  <div class="page" id="page-recon">
+    <div class="card">
+      <div class="card-title">💰 對帳作業</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <select class="select-in" id="reconYear" style="width:100px"></select>
+        <select class="select-in" id="reconMonth" style="width:90px"></select>
+        <select class="select-in" id="reconMerchant" style="min-width:160px"><option value="">（選擇商家）</option></select>
+        <select class="select-in" id="reconStatus" style="width:140px">
+          <option value="">全部狀態</option>
+          <option value="好糰對帳中">好糰對帳中</option>
+          <option value="店家對帳中">店家對帳中</option>
+          <option value="店家對帳完成">店家對帳完成</option>
+          <option value="發票已開立">發票已開立</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="searchRecon()">查詢</button>
+      </div>
+      <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="hidden">
+        <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">匯出對帳單 Excel</button>
+        <label class="btn btn-green btn-sm" id="btnReconImport">匯入對帳單 Excel<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
+        <button class="btn btn-primary btn-sm hidden" id="btnReconSend" onclick="sendRecon()">送出對帳單</button>
+        <button class="btn btn-primary btn-sm hidden" id="btnReconInvoice" onclick="markInvoiced()">標記發票已開立</button>
+      </div>
+      <div id="reconList"></div>
+    </div>
+    <!-- 商家對帳視圖 -->
+    <div class="card hidden" id="merchantReconCard">
+      <div class="card-title">📋 商家對帳</div>
+      <div id="merchantReconInfo" style="font-size:12px;color:#666;margin-bottom:8px"></div>
+      <div id="merchantReconTable"></div>
+      <div style="margin-top:12px;display:flex;gap:8px" id="merchantReconActions" class="hidden">
+        <button class="btn btn-primary" onclick="submitMerchantRecon()">送出對帳結果</button>
+      </div>
+    </div>
   </div>
 
   <!-- 設定 -->
@@ -509,7 +546,7 @@ function renderUsers(){
 }
 
 // ═══ SETTINGS ═══
-const G={items:[],searchItems:[],viewItems:[],stickers:[],rules:[],bagCap:8,ipp:6,storeName:'好櫃 RT麵包店',qrBase64:''};
+const G={items:[],searchItems:[],viewItems:[],stickers:[],rules:[],bagCap:8,ipp:6,storeName:'好櫃 RT麵包店',qrBase64:'',currentMerchant:''};
 function loadSettings(){
   const s=DB.get('settings',{});
   if(s.bagCap){G.bagCap=s.bagCap;el('bagCap').value=G.bagCap}
@@ -541,6 +578,7 @@ function switchTab(id){
   el('tab-'+id).classList.add('active');el('page-'+id).classList.add('active');
   if(id==='orders'){closeOrderDetail();showAllBatches()}
   if(id==='import'){refreshMerchantSelect()}
+  if(id==='recon'){initReconPage()}
 }
 function notify(msg,err=false){const n=el('notif');n.textContent=msg;n.className='notif'+(err?' err':'');clearTimeout(n._t);setTimeout(()=>n.classList.add('show'),10);n._t=setTimeout(()=>n.classList.remove('show'),3200)}
 function showProg(t){el('prog-text').textContent=t;el('prog').style.display='block'}
@@ -665,6 +703,25 @@ function saveBatchAndGo(){
   DB.set('batches',batches);notify(`✅ 已儲存（商家：${merchant}）`);G.items=[];el('importResult').classList.add('hidden');switchTab('orders');
 }
 function delBatch(id){const b=DB.get('batches',{});delete b[id];DB.set('batches',b);showAllBatches();notify('已刪除')}
+function changeBatchMerchant(id){
+  const list=getMerchants();
+  const batches=DB.get('batches',{});const b=batches[id];if(!b)return;
+  const cur=b.merchant||'';
+  const opts=list.map(n=>`<option value="${n}"${n===cur?' selected':''}>${n}</option>`).join('');
+  const d=document.createElement('div');
+  d.id='merchantChangeOverlay';
+  d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center';
+  d.innerHTML=`<div style="background:#fff;border-radius:12px;padding:24px;width:320px;box-shadow:0 8px 30px rgba(0,0,0,.2)"><div style="font-weight:700;font-size:15px;margin-bottom:12px">修改商家</div><div style="font-size:12px;color:#888;margin-bottom:8px">檔案：${b.fileName||'未命名'}</div><select id="changeMerchantSel" class="select-in" style="width:100%;margin-bottom:16px"><option value="">（請選擇商家）</option>${opts}</select><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('merchantChangeOverlay').remove()">取消</button><button class="btn btn-primary btn-sm" onclick="confirmChangeMerchant('${id}')">確認</button></div></div>`;
+  document.body.appendChild(d);
+}
+function confirmChangeMerchant(id){
+  const sel=document.getElementById('changeMerchantSel');if(!sel)return;
+  const newM=sel.value;if(!newM){notify('請選擇商家',true);return}
+  const batches=DB.get('batches',{});if(!batches[id])return;
+  batches[id].merchant=newM;DB.set('batches',batches);
+  document.getElementById('merchantChangeOverlay')?.remove();
+  showAllBatches();notify(`✅ 已更改為「${newM}」`);
+}
 
 // ═══ BATCH LIST & SEARCH ═══
 function showAllBatches(){
@@ -682,7 +739,8 @@ function showAllBatches(){
     const b=batches[id];const tQ=b.items.reduce((s,r)=>s+r.qty,0),tA=b.items.reduce((s,r)=>s+r.subtotal,0);
     const dates=[...new Set(b.items.map(r=>normDate(r.pickTime)).filter(Boolean))].sort();
     const merchantTag=b.merchant?`<span class="hi-tag">🏪 ${b.merchant}</span>`:'';
-    html+=`<div class="history-item"><div class="hi-icon">📦</div><div class="hi-info"><div class="hi-name">${b.fileName||'未命名'}</div><div class="hi-meta">${b.savedAt} · ${b.savedBy||''} · ${b.oids.length}筆 · ${tQ}個 · $${tA.toLocaleString()}</div><div class="hi-tags">${merchantTag}${dates.map(d=>`<span class="hi-tag">📅 ${d}</span>`).join('')}</div></div><div class="hi-actions"><button class="btn btn-primary btn-sm" onclick="viewBatchOrders('${id}')">查看訂單</button>${!isMerchant?`<button class="btn btn-ghost btn-sm" onclick="delBatch('${id}')">刪除</button>`:''}</div></div>`;
+    const canChange=isAdmin(CUR?.role)||CUR?.role==='cs';
+    html+=`<div class="history-item"><div class="hi-icon">📦</div><div class="hi-info"><div class="hi-name">${b.fileName||'未命名'}</div><div class="hi-meta">${b.savedAt} · ${b.savedBy||''} · ${b.oids.length}筆 · ${tQ}個 · $${tA.toLocaleString()}</div><div class="hi-tags">${merchantTag}${dates.map(d=>`<span class="hi-tag">📅 ${d}</span>`).join('')}</div></div><div class="hi-actions"><button class="btn btn-primary btn-sm" onclick="viewBatchOrders('${id}')">查看訂單</button>${canChange?`<button class="btn btn-ghost btn-sm" onclick="changeBatchMerchant('${id}')">修改商家</button>`:''}${!isMerchant?`<button class="btn btn-ghost btn-sm" onclick="delBatch('${id}')">刪除</button>`:''}</div></div>`;
   }
   el('batchList').innerHTML=html;
 }
@@ -691,6 +749,7 @@ function showAllBatches(){
 function viewBatchOrders(bid){
   const b=DB.get('batches',{})[bid];if(!b)return;
   G.searchItems=b.items;
+  G.currentMerchant=b.merchant||'';
   showOrderCards(b.items);
 }
 
@@ -882,7 +941,8 @@ function buildStickers(items){
     const personTotal=rows.reduce((s,r)=>s+(r.price||0)*r.qty,0);
     bags.forEach((bag,bi)=>{
       stk.push({
-        oid:r0.oid,person:r0.person,addr:r0.addr,pickTime:r0.pickTime,note:r0.note,
+        oid:r0.oid,person:r0.person,addr:r0.addr,pickTime:r0.pickTime,
+        note: bi===0 ? r0.note : '',
         bagItems:bag.contents, bagLabel:bag.label,
         bagNo:bi+1, totalBags:bags.length,
         personTotal: bi===0 ? personTotal : null
@@ -895,11 +955,13 @@ function stkHTML(pg){
   const tQ=pg.bagItems.reduce((s,r)=>s+r.qty,0);
   const tAmt=pg.bagItems.reduce((s,r)=>s+(r.price||0)*r.qty,0);
   const qr=G.qrBase64?`<img class="stk-qr" src="${G.qrBase64}">`:`<div class="stk-qr-ph">QR</div>`;
-  const note=pg.note||'';
+  const rawNote=pg.note||'';
+  const note=rawNote.length>50?rawNote.slice(0,50)+'…詳如訂單明細':rawNote;
   const bagInfo=pg.totalBags>1?` （${pg.bagNo}/${pg.totalBags}袋）`:'';
   const bagLabel=pg.bagLabel?` [${pg.bagLabel}]`:'';
   const pTotalRow=pg.personTotal!=null?`<div class="sf-row sf-total-row"><span class="sf-label">訂購總額</span><span class="sf-val">$${pg.personTotal.toLocaleString()}</span></div>`:'';
-  return`<div class="stk"><div class="stk-top"><span class="stk-store">${G.storeName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div>${note?`<div class="stk-note">備註：${note}</div>`:''}<div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div></div>`;
+  const stkStoreName='好糰'+(G.currentMerchant?' '+G.currentMerchant:'');
+  return`<div class="stk"><div class="stk-top"><span class="stk-store">${stkStoreName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div>${note?`<div class="stk-note">備註：${note}</div>`:''}<div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div></div>`;
 }
 function showStickers(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -1126,6 +1188,219 @@ function executeCleanup(){
   DB.set('batches',newBatches);
   el('cleanupPreview').style.display='none';el('confirmCleanBtn').style.display='none';el('cleanupDate').value='';_cleanupBackupDownloaded=false;
   notify(`✅ 已清除 ${cnt} 個舊訂單批次`);showAllBatches();
+}
+
+// ═══ RECONCILIATION ═══
+function initReconPage(){
+  const yr=el('reconYear'),mo=el('reconMonth'),ms=el('reconMerchant');
+  const now=new Date();const cy=now.getFullYear();
+  yr.innerHTML='';for(let y=cy;y>=cy-2;y--)yr.innerHTML+=`<option value="${y}">${y}</option>`;
+  mo.innerHTML='';for(let m=1;m<=12;m++)mo.innerHTML+=`<option value="${m}"${m===now.getMonth()+1?' selected':''}>${m}月</option>`;
+  const list=getMerchants();
+  if(CUR?.role==='merchant'){
+    ms.innerHTML=`<option value="${CUR.businessName}">${CUR.businessName}</option>`;
+    ms.disabled=true;
+  }else{
+    ms.innerHTML='<option value="">（選擇商家）</option>'+list.map(n=>`<option value="${n}">${n}</option>`).join('');
+    ms.disabled=false;
+  }
+  // 管理者顯示匯出/匯入按鈕，商家隱藏
+  el('reconActions').classList.toggle('hidden',CUR?.role==='merchant');
+  el('merchantReconCard').classList.add('hidden');
+  searchRecon();
+}
+function getReconKey(year,month,merchant){return`recon_${year}_${month}_${merchant}`}
+function searchRecon(){
+  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const merchant=el('reconMerchant').value,statusF=el('reconStatus').value;
+  const recons=DB.get('recons',{});
+  let html='';let found=false;
+  const merchants=merchant?[merchant]:getMerchants();
+  for(const m of merchants){
+    const key=getReconKey(year,month,m);
+    const rec=recons[key];
+    const status=rec?rec.status:'好糰對帳中';
+    if(statusF&&status!==statusF)continue;
+    found=true;
+    const SC={'好糰對帳中':'#999','店家對帳中':'#e67e22','店家對帳完成':'#27ae60','發票已開立':'#2980b9'};
+    const total=rec?rec.orders.reduce((s,o)=>s+o.amount,0):0;
+    html+=`<div class="history-item"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m}</div><div class="hi-meta">${year}年${month}月${rec?' · '+rec.orders.length+'筆 · $'+total.toLocaleString():' · 尚未產出對帳單'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span></div></div><div class="hi-actions">`;
+    if(CUR?.role==='merchant'&&status==='店家對帳中'){
+      html+=`<button class="btn btn-primary btn-sm" onclick="openMerchantRecon('${key}')">開始對帳</button>`;
+    }else if(isAdmin(CUR?.role)){
+      if(rec){html+=`<button class="btn btn-blue btn-sm" onclick="viewReconDetail('${key}')">查看明細</button>`}
+      if(status==='店家對帳完成'){html+=`<button class="btn btn-green btn-sm" onclick="markInvoiced('${key}')">標記發票已開立</button>`}
+    }
+    html+=`</div></div>`;
+  }
+  if(!found)html='<div class="empty-state"><div class="empty-icon">💰</div><div>無符合條件的對帳紀錄</div></div>';
+  el('reconList').innerHTML=html;
+  // 控制匯出按鈕
+  if(merchant&&isAdmin(CUR?.role)){
+    el('reconActions').classList.remove('hidden');
+    const key=getReconKey(year,month,merchant);
+    const rec=recons[key];
+    el('btnReconSend').classList.toggle('hidden',!rec||rec.status!=='好糰對帳中');
+    el('btnReconInvoice').classList.toggle('hidden',!rec||rec.status!=='店家對帳完成');
+  }else if(!isAdmin(CUR?.role)){
+    el('reconActions').classList.add('hidden');
+  }
+}
+function exportReconExcel(){
+  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const merchant=el('reconMerchant').value;
+  if(!merchant){notify('請選擇商家',true);return}
+  // 收集該月該商家的訂單
+  const batches=DB.get('batches',{});const orders=[];
+  for(const b of Object.values(batches)){
+    if(b.merchant!==merchant)continue;
+    // 按訂單ID群組
+    const byOid={};
+    for(const item of b.items){
+      const d=normDate(item.pickTime);if(!d)continue;
+      const [y,m]=d.split('-').map(Number);
+      if(y!==year||m!==month)continue;
+      if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0};
+      byOid[item.oid].amount+=item.subtotal;
+    }
+    orders.push(...Object.values(byOid));
+  }
+  if(!orders.length){notify('該月無訂單資料',true);return}
+  // 按日期排序
+  orders.sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
+  // 產出 Excel (步驟1格式)
+  const header=['取件日期','星期','訂單ID','主聯絡人','外送地址','商品總金額','好糰折扣','服務費計算基礎','服務費','應收','對帳結果 預設正確'];
+  const rows=[header];
+  const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+  orders.forEach((o,i)=>{
+    const dt=new Date(o.pickTime);const wk=isNaN(dt)?'':dayMap[dt.getDay()];
+    const base=o.amount;const fee=Math.round(base*0.17);const recv=base-fee;
+    rows.push([normDate(o.pickTime)||o.pickTime,wk,o.oid,o.buyer,o.addr,base,'',base,fee,recv,'']);
+  });
+  // 合計行
+  const sumRow=['','','合計','','',0,0,0,0,0,''];
+  for(let i=1;i<rows.length;i++){sumRow[5]+=rows[i][5];sumRow[7]+=rows[i][7];sumRow[8]+=rows[i][8];sumRow[9]+=rows[i][9]}
+  rows.push(sumRow);
+  // 空行 + 調帳 + 小計等
+  rows.push([]);rows.push([]);
+  rows.push(['調帳原因','','','','','調帳金額']);
+  rows.push([]);rows.push([]);
+  rows.push(['訂單金額小計',sumRow[7]]);
+  rows.push(['好糰折扣小計',sumRow[6]]);
+  rows.push(['調帳金額小計',0]);
+  rows.push(['合計',sumRow[7]]);
+  rows.push([]);
+  rows.push(['本期服務費',sumRow[8]]);
+  rows.push(['應收合計',sumRow[7]-sumRow[8]]);
+  rows.push([]);
+  rows.push(['匯款日期','']);
+  rows.push(['匯款金額',Math.round(sumRow[7]-sumRow[8])]);
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'好糰上傳');
+  XLSX.writeFile(wb,`對帳單_${merchant}_${year}年${month}月.xlsx`);
+  notify('✅ 對帳單已匯出');
+}
+function importReconExcel(inp){
+  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const merchant=el('reconMerchant').value;
+  if(!merchant){notify('請選擇商家',true);inp.value='';return}
+  const f=inp.files[0];if(!f){return}
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const data=new Uint8Array(e.target.result);
+    const wb=XLSX.read(data,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1});
+    if(rows.length<2){notify('檔案無資料',true);inp.value='';return}
+    // 解析訂單行（跳過表頭，到合計行為止）
+    const orders=[];let discountReason='',discountAmt=0,payDate='',payAmt=0;
+    for(let i=1;i<rows.length;i++){
+      const r=rows[i];
+      if(r[2]==='合計'||r[0]==='合計')break;
+      if(!r[2])continue;// skip empty
+      orders.push({pickTime:r[0]||'',weekday:r[1]||'',oid:String(r[2]),buyer:r[3]||'',addr:r[4]||'',amount:+r[5]||0,discount:+r[6]||0,base:+r[7]||0,fee:+r[8]||0,recv:+r[9]||0,result:r[10]||''});
+    }
+    // 找調帳和匯款資訊
+    for(let i=0;i<rows.length;i++){
+      if(rows[i][0]==='調帳原因'){discountReason=rows[i][1]||'';discountAmt=+rows[i][5]||0}
+      if(rows[i][0]==='匯款日期')payDate=rows[i][1]||'';
+      if(rows[i][0]==='匯款金額')payAmt=+rows[i][1]||0;
+    }
+    const key=getReconKey(year,month,merchant);
+    const recons=DB.get('recons',{});
+    recons[key]={year,month,merchant,status:'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname};
+    DB.set('recons',recons);
+    searchRecon();notify(`✅ 已匯入 ${orders.length} 筆對帳資料`);
+  };
+  reader.readAsArrayBuffer(f);inp.value='';
+}
+function sendRecon(){
+  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const merchant=el('reconMerchant').value;
+  if(!merchant){notify('請選擇商家',true);return}
+  const key=getReconKey(year,month,merchant);
+  const recons=DB.get('recons',{});
+  if(!recons[key]){notify('尚無對帳資料，請先匯出再匯入',true);return}
+  recons[key].status='店家對帳中';
+  recons[key].sentAt=new Date().toLocaleString('zh-TW');
+  recons[key].sentBy=CUR.nickname;
+  DB.set('recons',recons);
+  searchRecon();notify('✅ 對帳單已送出，等待店家對帳');
+}
+function markInvoiced(key){
+  if(!key){
+    const year=+el('reconYear').value,month=+el('reconMonth').value,merchant=el('reconMerchant').value;
+    if(!merchant){notify('請選擇商家',true);return}
+    key=getReconKey(year,month,merchant);
+  }
+  const recons=DB.get('recons',{});
+  if(!recons[key]){notify('無對帳資料',true);return}
+  recons[key].status='發票已開立';
+  recons[key].invoicedAt=new Date().toLocaleString('zh-TW');
+  DB.set('recons',recons);
+  searchRecon();notify('✅ 已標記發票已開立');
+}
+function viewReconDetail(key){
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
+  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px">${rec.year}年${rec.month}月 · ${rec.merchant} · 狀態：${rec.status}</div>`;
+  html+=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th style="text-align:right">金額</th><th style="text-align:right">折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
+  let tAmt=0,tFee=0,tRecv=0;
+  rec.orders.forEach(o=>{
+    tAmt+=o.amount;tFee+=o.fee;tRecv+=o.recv;
+    const rc=o.result==='錯誤'?'color:#c55;font-weight:700':'';
+    html+=`<tr style="border-bottom:1px solid #eee"><td style="padding:3px">${o.pickTime||''}</td><td>${o.oid}</td><td>${o.buyer}</td><td style="text-align:right">$${o.amount.toLocaleString()}</td><td style="text-align:right">${o.discount||''}</td><td style="text-align:right">$${o.fee.toLocaleString()}</td><td style="text-align:right">$${o.recv.toLocaleString()}</td><td style="${rc}">${o.result||'正確'}</td></tr>`;
+  });
+  html+=`<tr style="font-weight:700;border-top:2px solid #333"><td colspan="3">合計</td><td style="text-align:right">$${tAmt.toLocaleString()}</td><td></td><td style="text-align:right">$${tFee.toLocaleString()}</td><td style="text-align:right">$${tRecv.toLocaleString()}</td><td></td></tr></table>`;
+  if(rec.discountReason)html+=`<div style="margin-top:8px;font-size:11px">調帳原因：${rec.discountReason} · 調帳金額：$${rec.discountAmt}</div>`;
+  if(rec.payDate)html+=`<div style="font-size:11px">匯款日期：${rec.payDate} · 匯款金額：$${rec.payAmt}</div>`;
+  el('reconList').innerHTML=html;
+}
+// 商家對帳
+function openMerchantRecon(key){
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
+  el('merchantReconCard').classList.remove('hidden');
+  el('merchantReconInfo').textContent=`${rec.year}年${rec.month}月 · ${rec.merchant} · 共 ${rec.orders.length} 筆`;
+  let html=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th>地址</th><th style="text-align:right">金額</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>結果</th></tr>`;
+  rec.orders.forEach((o,i)=>{
+    html+=`<tr style="border-bottom:1px solid #eee"><td style="padding:3px">${o.pickTime||''}</td><td>${o.oid}</td><td>${o.buyer}</td><td style="font-size:10px">${o.addr}</td><td style="text-align:right">$${o.amount.toLocaleString()}</td><td style="text-align:right">$${o.fee.toLocaleString()}</td><td style="text-align:right">$${o.recv.toLocaleString()}</td><td><select class="select-in" style="font-size:10px;width:70px" data-idx="${i}"><option value="正確">正確</option><option value="錯誤"${o.result==='錯誤'?' selected':''}>錯誤</option></select></td></tr>`;
+  });
+  html+='</table>';
+  el('merchantReconTable').innerHTML=html;
+  el('merchantReconActions').classList.remove('hidden');
+  G._reconKey=key;
+  el('merchantReconCard').scrollIntoView({behavior:'smooth'});
+}
+function submitMerchantRecon(){
+  const key=G._reconKey;if(!key)return;
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
+  const selects=el('merchantReconTable').querySelectorAll('select');
+  selects.forEach(s=>{rec.orders[+s.dataset.idx].result=s.value});
+  rec.status='店家對帳完成';
+  rec.merchantConfirmedAt=new Date().toLocaleString('zh-TW');
+  rec.merchantConfirmedBy=CUR.nickname;
+  DB.set('recons',recons);
+  el('merchantReconCard').classList.add('hidden');
+  searchRecon();notify('✅ 對帳結果已送出');
 }
 
 // ═══ INIT (Firebase async) ═══
