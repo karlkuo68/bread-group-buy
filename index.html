@@ -366,7 +366,7 @@ tbody td{padding:8px 11px;vertical-align:top}
     </div>
     <div class="card">
       <div class="card-title">🏪 商家管理</div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.8">新增商家後，匯入訂單時即可指定所屬商家。</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.8">新增商家後，匯入訂單時可指定所屬商家。貼紙表頭將顯示「好糰 + 商家名稱」。</p>
       <div class="rule-list" id="merchantList"></div>
       <div class="rule-add-row">
         <input class="rule-in wide" id="newMerchantName" placeholder="輸入商家名稱">
@@ -699,6 +699,7 @@ function saveBatchAndGo(){
   const merchant=el('batchMerchant').value;
   if(!merchant){notify('請先選擇所屬商家',true);return}
   const batches=DB.get('batches',{});const id='b_'+Date.now();
+  G.items.forEach(r=>r.merchant=merchant);
   batches[id]={id,savedAt:new Date().toLocaleString('zh-TW'),savedBy:IMPORT_META.importedBy,fileName:IMPORT_META.fileName||'',merchant:merchant,oids:[...new Set(G.items.map(r=>r.oid))],items:G.items};
   DB.set('batches',batches);notify(`✅ 已儲存（商家：${merchant}）`);G.items=[];el('importResult').classList.add('hidden');switchTab('orders');
 }
@@ -718,7 +719,7 @@ function confirmChangeMerchant(id){
   const sel=document.getElementById('changeMerchantSel');if(!sel)return;
   const newM=sel.value;if(!newM){notify('請選擇商家',true);return}
   const batches=DB.get('batches',{});if(!batches[id])return;
-  batches[id].merchant=newM;DB.set('batches',batches);
+  batches[id].merchant=newM;batches[id].items.forEach(r=>r.merchant=newM);DB.set('batches',batches);
   document.getElementById('merchantChangeOverlay')?.remove();
   showAllBatches();notify(`✅ 已更改為「${newM}」`);
 }
@@ -942,6 +943,7 @@ function buildStickers(items){
     bags.forEach((bag,bi)=>{
       stk.push({
         oid:r0.oid,person:r0.person,addr:r0.addr,pickTime:r0.pickTime,
+        merchant:r0.merchant||G.currentMerchant||'',
         note: bi===0 ? r0.note : '',
         bagItems:bag.contents, bagLabel:bag.label,
         bagNo:bi+1, totalBags:bags.length,
@@ -960,7 +962,7 @@ function stkHTML(pg){
   const bagInfo=pg.totalBags>1?` （${pg.bagNo}/${pg.totalBags}袋）`:'';
   const bagLabel=pg.bagLabel?` [${pg.bagLabel}]`:'';
   const pTotalRow=pg.personTotal!=null?`<div class="sf-row sf-total-row"><span class="sf-label">訂購總額</span><span class="sf-val">$${pg.personTotal.toLocaleString()}</span></div>`:'';
-  const stkStoreName='好糰'+(G.currentMerchant?' '+G.currentMerchant:'');
+  const stkStoreName='好糰'+(pg.merchant?' '+pg.merchant:'');
   return`<div class="stk"><div class="stk-top"><span class="stk-store">${stkStoreName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div>${note?`<div class="stk-note">備註：${note}</div>`:''}<div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div></div>`;
 }
 function showStickers(items){
