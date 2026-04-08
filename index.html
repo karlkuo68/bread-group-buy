@@ -99,14 +99,14 @@ tbody td{padding:8px 11px;vertical-align:top}
 .sf-row{display:flex;gap:4px}.sf-label{color:#888;flex-shrink:0;min-width:52px}.sf-val{color:#333;font-weight:500;word-break:break-all}
 .sf-highlight .sf-val{font-weight:700;font-size:14px}
 .sf-total-row .sf-val{font-weight:700;color:var(--bread)}
-.stk-note{padding:2px 10px 3px;font-size:11px;color:#c55;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;word-break:break-all}
-.stk-note-sm{font-size:9.5px}
-.stk-tax{padding:1px 10px 2px;font-size:10.5px;color:#555;border-bottom:1px solid #eee;flex-shrink:0;font-weight:600}
 .stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
-.stk-items{padding:2px 8px 4px;flex:1;overflow:hidden}
+.stk-items{padding:2px 8px 6px;flex-shrink:0}
 .stk-item{padding:2px 0;font-size:12px;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
 .stk-item:last-child{border-bottom:none}
-.item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item-name{flex:1;word-break:break-word}
+.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4;overflow:hidden;max-height:5.2em}
+.stk-tax{font-size:9.5px;color:#555;font-weight:600;margin-bottom:1px}
+.stk-note{font-size:10px;color:#c55;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .item-pq{font-family:'DM Mono',monospace;font-size:11px;color:#555;white-space:nowrap;text-align:right}
 .pk-section{margin-bottom:20px;border-radius:var(--r);overflow:hidden;border:1px solid #E4D9CC;box-shadow:0 2px 8px var(--shadow)}
 .pk-hdr{background:var(--crust);color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
@@ -969,17 +969,21 @@ function stkHTML(pg){
   const tAmt=pg.bagItems.reduce((s,r)=>s+(r.price||0)*r.qty,0);
   const qr=G.qrBase64?`<img class="stk-qr" src="${G.qrBase64}">`:`<div class="stk-qr-ph">QR</div>`;
   const rawNote=pg.note||'';
-  // 偵測統編（台灣統一編號：8位數字），獨立顯示不佔備註空間
+  // 偵測統編（台灣統一編號：8位數字），獨立顯示
   const taxMatch=rawNote.match(/統編[：:\s]*(\d{8})/);
   const taxId=taxMatch?taxMatch[1]:'';
   const noteWithoutTax=taxId?rawNote.replace(/統編[：:\s]*\d{8}/,'').trim():rawNote;
   const note=noteWithoutTax.length>60?noteWithoutTax.slice(0,60)+'…':noteWithoutTax;
-  const noteSmall=noteWithoutTax.length>40;
   const bagInfo=pg.totalBags>1?` （${pg.bagNo}/${pg.totalBags}袋）`:'';
   const bagLabel=pg.bagLabel?` [${pg.bagLabel}]`:'';
   const pTotalRow=pg.personTotal!=null?`<div class="sf-row sf-total-row"><span class="sf-label">訂購總額</span><span class="sf-val">$${pg.personTotal.toLocaleString()}</span></div>`:'';
   const stkStoreName='好糰'+(pg.merchant?' x '+pg.merchant:'');
-  return`<div class="stk"><div class="stk-top"><span class="stk-store">${stkStoreName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div>${note?`<div class="stk-note${noteSmall?' stk-note-sm':''}">備註：${note}</div>`:''}${taxId?`<div class="stk-tax">統編：${taxId}</div>`:''}<div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div></div>`;
+  // 品項字體依數量動態調整（品項越多字越小）
+  const n=pg.bagItems.length;
+  const itemFs=n<=3?12:n<=5?11:n<=8?10:9;
+  // 備註+統編合併為 footer（最低優先，在品項之後）
+  const footerHtml=(note||taxId)?`<div class="stk-footer">${taxId?`<div class="stk-tax">統編：${taxId}</div>`:''}${note?`<div class="stk-note">備註：${note}</div>`:''}</div>`:'';
+  return`<div class="stk"><div class="stk-top"><span class="stk-store">${stkStoreName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div><div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items" style="font-size:${itemFs}px">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div>${footerHtml}</div>`;
 }
 function showStickers(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -1069,18 +1073,40 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 .sf-row{display:flex;gap:4px}.sf-label{color:#888;flex-shrink:0;min-width:52px}.sf-val{color:#333;font-weight:500;word-break:break-all}
 .sf-highlight .sf-val{font-weight:700;font-size:14px}
 .sf-total-row .sf-val{font-weight:700;color:#b5651d}
-.stk-note{padding:2px 10px 3px;font-size:11px;color:#c55;border-bottom:1px solid #eee;flex-shrink:0;line-height:1.4;word-break:break-all}
-.stk-note-sm{font-size:9.5px}
-.stk-tax{padding:1px 10px 2px;font-size:10.5px;color:#555;border-bottom:1px solid #eee;flex-shrink:0;font-weight:600}
 .stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
-.stk-items{padding:2px 8px 4px;flex:1;overflow:hidden}
+.stk-items{padding:2px 8px 6px;flex-shrink:0}
 .stk-item{padding:2px 0;font-size:12px;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
 .stk-item:last-child{border-bottom:none}
-.item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item-name{flex:1;word-break:break-word}
+.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4;overflow:hidden;max-height:5.2em}
+.stk-tax{font-size:9.5px;color:#555;font-weight:600;margin-bottom:1px}
+.stk-note{font-size:10px;color:#c55;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .item-pq{font-family:'DM Mono',monospace;font-size:11px;color:#555;white-space:nowrap;text-align:right}
 @media print{@page{size:80mm 100mm;margin:0}.stk{box-shadow:none!important;border-radius:0!important;border:none!important;margin:0!important;width:80mm!important;height:100mm!important;page-break-after:always}}
 </style></head><body>${html}
-<script>window.onafterprint=function(){window.close()};setTimeout(function(){window.print()},600);<\/script>
+<script>
+window.onafterprint=function(){window.close()};
+window.onload=function(){
+  // 品項絕不截斷：先縮 footer，再縮品項字體（最後手段）
+  document.querySelectorAll('.stk').forEach(function(s){
+    var footer=s.querySelector('.stk-footer');
+    var items=s.querySelector('.stk-items');
+    if(!items)return;
+    // 步驟1：縮小 footer 字體
+    if(footer&&s.scrollHeight>s.clientHeight){
+      footer.style.fontSize='8px';footer.style.maxHeight='3em';
+    }
+    // 步驟2：還溢出 → 隱藏 footer
+    if(footer&&s.scrollHeight>s.clientHeight){
+      footer.style.display='none';
+    }
+    // 步驟3：品項仍溢出 → 縮品項字體（最後手段，不截斷）
+    if(s.scrollHeight>s.clientHeight){items.style.fontSize='9px';}
+    if(s.scrollHeight>s.clientHeight){items.style.fontSize='8px';}
+  });
+  setTimeout(function(){window.print()},800);
+};
+<\/script>
 </body></html>`);
   win.document.close();
   notify('📄 列印視窗已開啟，請選擇「儲存為 PDF」');
