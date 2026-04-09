@@ -100,14 +100,14 @@ tbody td{padding:8px 11px;vertical-align:top}
 .sf-highlight .sf-val{font-weight:700;font-size:14px}
 .sf-total-row .sf-val{font-weight:700;color:var(--bread)}
 .stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
-.stk-items{padding:2px 8px 6px;flex-shrink:0}
-.stk-item{padding:2px 0;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
-.stk-item:last-child{border-bottom:none}
-.item-name{flex:1;word-break:keep-all;overflow-wrap:anywhere}
-.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4;overflow:hidden;max-height:5.2em}
+.stk-items{display:grid;grid-template-columns:1fr 1fr;column-gap:3mm;row-gap:0.8mm;padding:2px 8px 6px;flex-shrink:0}
+.stk-items.single-col{grid-template-columns:1fr}
+.stk-item{display:flex;justify-content:space-between;gap:1mm;word-break:keep-all;overflow-wrap:anywhere}
+.name{flex:1;word-break:keep-all;overflow-wrap:anywhere}
+.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4}
 .stk-tax{font-size:9.5px;color:#555;font-weight:600;margin-bottom:1px}
-.stk-note{font-size:10px;color:#c55;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.item-pq{font-family:'DM Mono',monospace;font-size:0.9em;color:#555;white-space:nowrap;text-align:right}
+.stk-note{font-size:10px;color:#c55;word-break:break-all}
+.pq{font-family:'DM Mono',monospace;font-size:0.9em;color:#555;white-space:nowrap;text-align:right}
 .pk-section{margin-bottom:20px;border-radius:var(--r);overflow:hidden;border:1px solid #E4D9CC;box-shadow:0 2px 8px var(--shadow)}
 .pk-hdr{background:var(--crust);color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .pk-hdr-name{font-size:14px;font-weight:700;font-family:'Noto Serif TC',serif}
@@ -978,12 +978,13 @@ function stkHTML(pg){
   const bagLabel=pg.bagLabel?` [${pg.bagLabel}]`:'';
   const pTotalRow=pg.personTotal!=null?`<div class="sf-row sf-total-row"><span class="sf-label">訂購總額</span><span class="sf-val">$${pg.personTotal.toLocaleString()}</span></div>`:'';
   const stkStoreName='好糰'+(pg.merchant?' x '+pg.merchant:'');
-  // 品項字體依數量動態調整（品項越多字越小）
+  // 品項字體初始值依數量設定，雙欄省一半列數
   const n=pg.bagItems.length;
-  const itemFs=n<=3?12:n<=5?11:n<=8?10:9;
-  // 備註+統編合併為 footer（最低優先，在品項之後）
+  const itemFs=n<=3?13:n<=9?12:n<=19?11:10;
+  const colClass=n<=3?'single-col':'';
+  // 備註+統編合併為 footer（絕不隱藏）
   const footerHtml=(note||taxId)?`<div class="stk-footer">${taxId?`<div class="stk-tax">統編：${taxId}</div>`:''}${note?`<div class="stk-note">備註：${note}</div>`:''}</div>`:'';
-  return`<div class="stk"><div class="stk-top"><span class="stk-store">${stkStoreName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div><div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items" style="font-size:${itemFs}px">${pg.bagItems.map(r=>`<div class="stk-item"><span class="item-name">${r.name}</span><span class="item-pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div>${footerHtml}</div>`;
+  return`<div class="stk"><div class="stk-top"><span class="stk-store">${stkStoreName}</span>${qr}</div><div class="stk-fields"><div class="sf-row"><span class="sf-label">訂單</span><span class="sf-val">${pg.oid}</span></div><div class="sf-row sf-highlight"><span class="sf-label">取件人</span><span class="sf-val">${pg.person}${bagInfo}</span></div>${pTotalRow}<div class="sf-row"><span class="sf-label">地址</span><span class="sf-val">${pg.addr||'—'}</span></div><div class="sf-row"><span class="sf-label">取件時間</span><span class="sf-val">${pg.pickTime||'—'}</span></div></div><div class="stk-summary">共 ${tQ} 個 · 本袋 $${tAmt.toLocaleString()}${bagLabel}</div><div class="stk-items ${colClass}" style="font-size:${itemFs}px">${pg.bagItems.map(r=>`<div class="stk-item"><span class="name">${r.name}</span><span class="pq">$${r.price||0} ×${r.qty}</span></div>`).join('')}</div>${footerHtml}</div>`;
 }
 function showStickers(items){
   if(!items||!items.length){notify('無資料',true);return}
@@ -1074,14 +1075,14 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 .sf-highlight .sf-val{font-weight:700;font-size:14px}
 .sf-total-row .sf-val{font-weight:700;color:#b5651d}
 .stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
-.stk-items{padding:2px 8px 6px;flex-shrink:0}
-.stk-item{padding:2px 0;border-bottom:1px dashed #f0f0f0;display:flex;align-items:baseline;gap:4px}
-.stk-item:last-child{border-bottom:none}
-.item-name{flex:1;word-break:keep-all;overflow-wrap:anywhere}
-.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4;overflow:hidden;max-height:5.2em}
+.stk-items{display:grid;grid-template-columns:1fr 1fr;column-gap:3mm;row-gap:0.8mm;padding:2px 8px 6px;flex-shrink:0}
+.stk-items.single-col{grid-template-columns:1fr}
+.stk-item{display:flex;justify-content:space-between;gap:1mm;word-break:keep-all;overflow-wrap:anywhere}
+.name{flex:1;word-break:keep-all;overflow-wrap:anywhere}
+.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4}
 .stk-tax{font-size:9.5px;color:#555;font-weight:600;margin-bottom:1px}
-.stk-note{font-size:10px;color:#c55;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.item-pq{font-family:'DM Mono',monospace;font-size:0.9em;color:#555;white-space:nowrap;text-align:right}
+.stk-note{font-size:10px;color:#c55;word-break:break-all}
+.pq{font-family:'DM Mono',monospace;font-size:0.9em;color:#555;white-space:nowrap;text-align:right}
 @media print{@page{size:80mm 100mm;margin:0}.stk{box-shadow:none!important;border-radius:0!important;border:none!important;margin:0!important;width:80mm!important;height:100mm!important;page-break-after:always}}
 </style></head><body>${html}
 <script>
@@ -1092,28 +1093,32 @@ function fitAllStickers(){
       var footer=s.querySelector('.stk-footer');
       var items=s.querySelector('.stk-items');
       if(!items)return;
-      var itemPx=parseFloat(getComputedStyle(items).fontSize)||10;
-      var footerPx=9;
+      var itemPx=parseFloat(getComputedStyle(items).fontSize)||11;
+      var footerPx=footer?parseFloat(getComputedStyle(footer).fontSize)||10:10;
       var tries=0;
-      // 步驟1：同時縮品項 + footer，直到塞下（最小 6px，最多 20 次）
-      while(s.scrollHeight>s.clientHeight&&itemPx>6&&tries<20){
+      // 步驟1：優先縮品項到 10px，再縮 footer 到 9px
+      while(s.scrollHeight>s.clientHeight&&tries<20){
         tries++;
-        itemPx-=1;
-        footerPx=Math.max(footerPx-1,6);
-        items.style.fontSize=itemPx+'px';
-        if(footer)footer.style.fontSize=footerPx+'px';
+        if(itemPx>10){
+          itemPx-=0.5;
+          items.style.fontSize=itemPx+'px';
+        }else if(footer&&footerPx>9){
+          footerPx-=0.5;
+          footer.style.fontSize=footerPx+'px';
+        }else{
+          break;
+        }
       }
-      // 步驟2：還溢出 → 縮 padding / line-height
+      // 步驟2：還溢出 → 縮 padding / row-gap（絕不藏 footer）
       if(s.scrollHeight>s.clientHeight){
-        items.style.padding='1px 6px 2px';
-        items.querySelectorAll('.stk-item').forEach(function(it){it.style.padding='1px 0';});
-        items.style.lineHeight='1.1';
-        if(footer){footer.style.padding='1px 8px 2px';footer.style.lineHeight='1.1';}
+        s.style.padding='2mm';
+        items.style.rowGap='0.4mm';
+        if(footer)footer.style.lineHeight='1.1';
       }
-      // 步驟3：最後手段才隱藏 footer（需 20+ 項才會發生）
-      if(s.scrollHeight>s.clientHeight&&footer){
-        console.warn('[sticker] 極限：隱藏 footer，品項數=',items.querySelectorAll('.stk-item').length);
-        footer.style.display='none';
+      // 步驟3：超過 25 項極端狀況才再縮 footer 字體（不藏）
+      if(s.scrollHeight>s.clientHeight&&footer&&items.querySelectorAll('.stk-item').length>25){
+        console.warn('[sticker] 超過 25 項極限，footer 縮到最小');
+        footer.style.fontSize='8px';
       }
     });
   }catch(e){console.warn('[sticker] fit error:',e);}
