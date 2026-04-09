@@ -1086,35 +1086,53 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 </style></head><body>${html}
 <script>
 window.onafterprint=function(){window.close()};
-window.onload=function(){
-  document.querySelectorAll('.stk').forEach(function(s){
-    var footer=s.querySelector('.stk-footer');
-    var items=s.querySelector('.stk-items');
-    if(!items)return;
-    var itemPx=parseFloat(getComputedStyle(items).fontSize)||10;
-    var footerPx=9;
-    // 步驟1：同時縮品項 + footer，直到塞下（最小 6px）
-    while(s.scrollHeight>s.clientHeight&&itemPx>6){
-      itemPx-=1;
-      footerPx=Math.max(footerPx-1,6);
-      items.style.fontSize=itemPx+'px';
-      if(footer)footer.style.fontSize=footerPx+'px';
-    }
-    // 步驟2：還溢出 → 縮 padding / line-height
-    if(s.scrollHeight>s.clientHeight){
-      items.style.padding='1px 6px 2px';
-      items.querySelectorAll('.stk-item').forEach(function(it){it.style.padding='1px 0';});
-      items.style.lineHeight='1.1';
-      if(footer){footer.style.padding='1px 8px 2px';footer.style.lineHeight='1.1';}
-    }
-    // 步驟3：最後手段才隱藏 footer（需 20+ 項才會發生）
-    if(s.scrollHeight>s.clientHeight&&footer){
-      console.warn('[sticker] 極限：隱藏 footer，品項數=',items.querySelectorAll('.stk-item').length);
-      footer.style.display='none';
-    }
+function fitAllStickers(){
+  try{
+    document.querySelectorAll('.stk').forEach(function(s){
+      var footer=s.querySelector('.stk-footer');
+      var items=s.querySelector('.stk-items');
+      if(!items)return;
+      var itemPx=parseFloat(getComputedStyle(items).fontSize)||10;
+      var footerPx=9;
+      var tries=0;
+      // 步驟1：同時縮品項 + footer，直到塞下（最小 6px，最多 20 次）
+      while(s.scrollHeight>s.clientHeight&&itemPx>6&&tries<20){
+        tries++;
+        itemPx-=1;
+        footerPx=Math.max(footerPx-1,6);
+        items.style.fontSize=itemPx+'px';
+        if(footer)footer.style.fontSize=footerPx+'px';
+      }
+      // 步驟2：還溢出 → 縮 padding / line-height
+      if(s.scrollHeight>s.clientHeight){
+        items.style.padding='1px 6px 2px';
+        items.querySelectorAll('.stk-item').forEach(function(it){it.style.padding='1px 0';});
+        items.style.lineHeight='1.1';
+        if(footer){footer.style.padding='1px 8px 2px';footer.style.lineHeight='1.1';}
+      }
+      // 步驟3：最後手段才隱藏 footer（需 20+ 項才會發生）
+      if(s.scrollHeight>s.clientHeight&&footer){
+        console.warn('[sticker] 極限：隱藏 footer，品項數=',items.querySelectorAll('.stk-item').length);
+        footer.style.display='none';
+      }
+    });
+  }catch(e){console.warn('[sticker] fit error:',e);}
+}
+// 用 requestAnimationFrame 確保 layout 完成後再 fit，再等字型載入後列印
+document.addEventListener('DOMContentLoaded',function(){
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      fitAllStickers();
+      // 等字型載入完成再列印（最多等 3 秒）
+      var printed=false;
+      function doPrint(){if(printed)return;printed=true;window.print();}
+      if(document.fonts&&document.fonts.ready){
+        document.fonts.ready.then(function(){setTimeout(doPrint,200);});
+      }
+      setTimeout(doPrint,2000);// 保底 2 秒
+    });
   });
-  setTimeout(function(){window.print()},800);
-};
+});
 <\/script>
 </body></html>`);
   win.document.close();
