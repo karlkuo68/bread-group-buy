@@ -1087,27 +1087,30 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 <script>
 window.onafterprint=function(){window.close()};
 window.onload=function(){
-  // 品項絕不截斷：先縮 footer，再循環縮品項字體直到 fit
   document.querySelectorAll('.stk').forEach(function(s){
     var footer=s.querySelector('.stk-footer');
     var items=s.querySelector('.stk-items');
     if(!items)return;
-    // 步驟1：縮小 footer 字體
-    if(footer&&s.scrollHeight>s.clientHeight){
-      footer.style.fontSize='8px';footer.style.maxHeight='3em';
+    var itemPx=parseFloat(getComputedStyle(items).fontSize)||10;
+    var footerPx=9;
+    // 步驟1：同時縮品項 + footer，直到塞下（最小 6px）
+    while(s.scrollHeight>s.clientHeight&&itemPx>6){
+      itemPx-=1;
+      footerPx=Math.max(footerPx-1,6);
+      items.style.fontSize=itemPx+'px';
+      if(footer)footer.style.fontSize=footerPx+'px';
     }
-    // 步驟2：還溢出 → 隱藏 footer
-    if(footer&&s.scrollHeight>s.clientHeight){
-      footer.style.display='none';
-    }
-    // 步驟3：品項仍溢出 → 循環縮品項字體 + padding，直到 fit（最小 6px）
-    var fs=parseFloat(items.style.fontSize)||parseFloat(getComputedStyle(items).fontSize)||10;
-    while(s.scrollHeight>s.clientHeight&&fs>6){
-      fs=Math.max(6,fs-1);
-      items.style.fontSize=fs+'px';
+    // 步驟2：還溢出 → 縮 padding / line-height
+    if(s.scrollHeight>s.clientHeight){
       items.style.padding='1px 6px 2px';
-      // 同步縮每個 item 的 padding
       items.querySelectorAll('.stk-item').forEach(function(it){it.style.padding='1px 0';});
+      items.style.lineHeight='1.1';
+      if(footer){footer.style.padding='1px 8px 2px';footer.style.lineHeight='1.1';}
+    }
+    // 步驟3：最後手段才隱藏 footer（需 20+ 項才會發生）
+    if(s.scrollHeight>s.clientHeight&&footer){
+      console.warn('[sticker] 極限：隱藏 footer，品項數=',items.querySelectorAll('.stk-item').length);
+      footer.style.display='none';
     }
   });
   setTimeout(function(){window.print()},800);
