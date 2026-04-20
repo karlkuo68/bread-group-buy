@@ -126,7 +126,7 @@ Firebase Realtime DB
 ## 最近 10 筆 commit
 
 ```
-（下個 commit）fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
+1a1aad6 fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
 97fb772 feat(recon): 對帳頁日期區間查詢 + 上半月/下半月快捷 + Firebase 同步狀態（2026-04-20）
 4d13497 feat: 匯入重複訂單防呆 + 商家已接受按鈕（2026-04-20）
 81e756b docs: 新增 CLAUDE.md 專案記憶
