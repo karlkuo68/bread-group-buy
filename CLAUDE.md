@@ -98,6 +98,11 @@ Firebase Realtime DB
   - 勾選 = 用新資料取代（舊批次對應品項移除，空批次自動刪除）
   - 不勾 = 略過此筆（保留舊資料，新匯入捨棄）
   - 解決「同筆訂單重複計入預覽分裝表」的 bug
+- **匯出對帳單支援日期區間 + 調帳歸零（2026-04-20，再修正）**
+  - Issue 1: 有設日期區間時，「匯出對帳單 Excel」會依區間過濾 batches，檔名 `對帳單_商家_YYYY-MM-DD_至_YYYY-MM-DD.xlsx`（或單日 `對帳單_商家_YYYY-MM-DD.xlsx`）
+  - 區間模式會略過 cache，直接從 batches 讀最新資料
+  - Issue 2: `regenerateReconFromBatches` 重算時 `discountReason`/`discountAmt` 歸零（Ken 要求：訂單變動後調帳需重新評估）
+  - 區間匯出也會自動把調帳/匯款欄位歸零（對帳 Excel 裡的「調帳原因/金額」留空）
 - **匯出對帳單過期 cache 防呆（2026-04-20）**
   - 症狀：刪除訂單後重新匯入，匯出對帳單 Excel 仍是舊資料
   - 根因：`recons[key]` 被 importReconExcel / sendRecon / markInvoiced 儲存成快照後，exportReconExcel 就一直用舊資料不重讀 batches
@@ -126,6 +131,7 @@ Firebase Realtime DB
 ## 最近 10 筆 commit
 
 ```
+（下個 commit）fix(recon): 匯出對帳單支援日期區間 + 重算時調帳歸零（2026-04-20）
 1a1aad6 fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
 97fb772 feat(recon): 對帳頁日期區間查詢 + 上半月/下半月快捷 + Firebase 同步狀態（2026-04-20）
 4d13497 feat: 匯入重複訂單防呆 + 商家已接受按鈕（2026-04-20）

@@ -1662,15 +1662,16 @@ function regenerateReconFromBatches(year,month,merchant,preserveMeta){
       }
     });
   }
+  // 重算時：調帳歸零（訂單變動後調帳需重新評估，Ken 要求）；匯款/狀態保留
   const newRec=preserveMeta?{
     ...old,orders,
     status:old.status||'好糰對帳中',
-    discountReason:old.discountReason||'',
-    discountAmt:old.discountAmt||0,
+    discountReason:'',
+    discountAmt:0,
     payDate:old.payDate||'',
     payAmt:old.payAmt||0,
     rebuiltAt:new Date().toLocaleString('zh-TW')
-  }:{orders,status:'好糰對帳中',rebuiltAt:new Date().toLocaleString('zh-TW')};
+  }:{orders,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
   recons[key]=newRec;
   DB.set('recons',recons);
   console.log('[regenerateRecon]',key,'orders=',orders.length,'preserveMeta=',preserveMeta);
@@ -1681,7 +1682,7 @@ function rebuildReconFromBatches(){
   const year=+el('reconYear').value,month=+el('reconMonth').value;
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請先選擇商家',true);return}
-  if(!confirm(`確定要用最新訂單重算「${merchant} ${year}年${month}月」對帳單？\n\n✅ 保留：調帳原因/金額、匯款日期/金額、狀態、手動調整欄位（金額未變時）\n🔄 重產：訂單清單（以 batches 為準）`))return;
+  if(!confirm(`確定要用最新訂單重算「${merchant} ${year}年${month}月」對帳單？\n\n✅ 保留：匯款日期/金額、對帳狀態、每筆訂單的手動調整（金額未變時）\n⚠️ 歸零：調帳原因、調帳金額（訂單變動後需重新評估）\n🔄 重產：訂單清單（以 batches 為準）`))return;
   const rec=regenerateReconFromBatches(year,month,merchant,true);
   if(!rec.orders.length){
     notify('⚠️ 該月該商家在批次中無訂單，對帳單已清空',true);
@@ -1732,11 +1733,16 @@ function exportReconExcel(){
   const year=+el('reconYear').value,month=+el('reconMonth').value;
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請選擇商家',true);return}
+  // 日期區間（選填）— 若有設則以區間匯出，不用整月 cache
+  const dfRaw=el('reconDateFrom')?.value||'',dtRaw=el('reconDateTo')?.value||'';
+  const hasRange=!!(dfRaw||dtRaw);
+  const df=dfRaw||dtRaw,dt=dtRaw||dfRaw;
+  if(hasRange&&df>dt){notify('起始日期不能晚於結束日期',true);return}
   const key=getReconKey(year,month,merchant);
   let recons=DB.get('recons',{});
   let existingRec=recons[key];
-  // 🛡️ 防呆：如果 cache 與 batches 不一致 → 提示是否重算
-  if(existingRec?.orders?.length){
+  // 🛡️ 防呆：只有整月模式才做 cache 過期偵測（區間模式直接從 batches 重讀）
+  if(!hasRange && existingRec?.orders?.length){
     const stale=detectReconStale(existingRec.orders,merchant,year,month);
     if(stale.stale){
       const fmt=(arr,max=3)=>arr.length?('（'+arr.slice(0,max).join('、')+(arr.length>max?' 等':'')+'）'):'';
@@ -1744,11 +1750,11 @@ function exportReconExcel(){
         (stale.addedOids.length?`・新增 ${stale.addedOids.length} 筆${fmt(stale.addedOids)}\n`:'')+
         (stale.removedOids.length?`・刪除 ${stale.removedOids.length} 筆${fmt(stale.removedOids)}\n`:'')+
         (stale.changedOids.length?`・金額變動 ${stale.changedOids.length} 筆${fmt(stale.changedOids)}\n`:'')+
-        `\n要用最新訂單重算對帳單再匯出嗎？\n\n✅ 是 = 重算（保留調帳/匯款/狀態設定）← 建議\n❌ 否 = 用舊資料匯出`;
+        `\n要用最新訂單重算對帳單再匯出嗎？\n\n✅ 是 = 重算（保留匯款/狀態；調帳歸零）← 建議\n❌ 否 = 用舊資料匯出`;
       if(confirm(msg)){
         existingRec=regenerateReconFromBatches(year,month,merchant,true);
         recons=DB.get('recons',{});
-        notify('✅ 已依最新訂單重算，即將匯出');
+        notify('✅ 已依最新訂單重算（調帳已歸零），即將匯出');
       }
     }
   }
@@ -1756,23 +1762,43 @@ function exportReconExcel(){
   const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
   const rows=[header];
   let orders=[];
-  if(existingRec&&existingRec.orders&&existingRec.orders.length){
-    // 使用已匯入的對帳資料（保留手動調整的金額）
+  if(hasRange){
+    // 區間模式：從 batches 依日期過濾（不用 cache，也不帶 metadata 的調帳/匯款）
+    const batches=DB.get('batches',{});
+    const byOid={};
+    for(const b of Object.values(batches)){
+      if(b.merchant!==merchant)continue;
+      for(const item of (b.items||[])){
+        const d=normDate(item.pickTime);if(!d)continue;
+        if(d<df||d>dt)continue;
+        if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0};
+        byOid[item.oid].amount+=item.subtotal||0;
+      }
+    }
+    orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
+    console.log('[exportRecon] 區間模式',df,'~',dt,'orders=',orders.length);
+    orders.forEach(o=>{
+      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
+      const base=o.amount;const fee=Math.round(base*0.17);const recv=base-fee;
+      rows.push([normDate(o.pickTime)||o.pickTime,wk,o.oid,o.buyer,o.addr,base,0,base,fee,recv,'']);
+    });
+  }else if(existingRec&&existingRec.orders&&existingRec.orders.length){
+    // 整月模式：使用 cache（已處理過期偵測）
     orders=existingRec.orders;
     console.log('[exportRecon] 使用已存在對帳資料 key=',key,'orders=',orders.length);
     orders.forEach(o=>{
-      const dt=new Date(o.pickTime);const wk=isNaN(dt)?'':dayMap[dt.getDay()];
+      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
       rows.push([o.pickTime||'',wk,o.oid,o.buyer,o.addr||'',o.amount,o.discount||0,o.base||o.amount,o.fee||0,o.recv||0,o.result||'']);
     });
   }else{
-    // 從批次資料重新產生（首次匯出）
+    // 整月模式：從批次首次產生
     const batches=DB.get('batches',{});
     for(const b of Object.values(batches)){
       if(b.merchant!==merchant)continue;
       const byOid={};
-      for(const item of b.items){
+      for(const item of (b.items||[])){
         const d=normDate(item.pickTime);if(!d)continue;
-        const [y,m]=d.split('-').map(Number);
+        const[y,m]=d.split('-').map(Number);
         if(y!==year||m!==month)continue;
         if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0};
         byOid[item.oid].amount+=item.subtotal;
@@ -1782,35 +1808,43 @@ function exportReconExcel(){
     console.log('[exportRecon] 從批次重新產生 orders=',orders.length);
     orders.sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
     orders.forEach(o=>{
-      const dt=new Date(o.pickTime);const wk=isNaN(dt)?'':dayMap[dt.getDay()];
+      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
       const base=o.amount;const fee=Math.round(base*0.17);const recv=base-fee;
       rows.push([normDate(o.pickTime)||o.pickTime,wk,o.oid,o.buyer,o.addr,base,0,base,fee,recv,'']);
     });
   }
-  if(!orders.length){notify('該月無訂單資料',true);return}
+  if(!orders.length){notify(hasRange?'此區間無訂單資料':'該月無訂單資料',true);return}
   // 合計行
   const sumRow=['','','合計','','',0,0,0,0,0,''];
   for(let i=1;i<rows.length;i++){sumRow[5]+=rows[i][5]||0;sumRow[6]+=rows[i][6]||0;sumRow[7]+=rows[i][7]||0;sumRow[8]+=rows[i][8]||0;sumRow[9]+=rows[i][9]||0}
   rows.push(sumRow);
-  // 空行 + 調帳（調帳原因/金額各佔一行，值在 B 欄）
+  // 調帳 / 匯款 — 區間模式歸 0 / 空；整月模式沿用 existingRec
+  const discReason=hasRange?'':(existingRec?.discountReason||'');
+  const discAmt=hasRange?0:(existingRec?.discountAmt||0);
+  const payDate=hasRange?'':(existingRec?.payDate||'');
+  const payAmt=hasRange?Math.round(sumRow[7]-sumRow[8]):(existingRec?.payAmt||Math.round(sumRow[7]-sumRow[8]));
   rows.push([]);rows.push([]);
-  rows.push(['調帳原因',existingRec?.discountReason||'']);
-  rows.push(['調帳金額',existingRec?.discountAmt||0]);
+  rows.push(['調帳原因',discReason]);
+  rows.push(['調帳金額',discAmt]);
   rows.push([]);rows.push([]);
   rows.push(['訂單金額小計',sumRow[7]]);
   rows.push(['好糰折扣小計',sumRow[6]]);
-  rows.push(['調帳金額小計',existingRec?.discountAmt||0]);
-  rows.push(['合計',sumRow[7]]);
+  rows.push(['調帳金額小計',discAmt]);
+  rows.push(['合計',sumRow[7]+discAmt]);
   rows.push([]);
   rows.push(['本期服務費',sumRow[8]]);
-  rows.push(['應收合計',sumRow[7]-sumRow[8]]);
+  rows.push(['應收合計',sumRow[7]-sumRow[8]+discAmt]);
   rows.push([]);
-  rows.push(['匯款日期',existingRec?.payDate||'']);
-  rows.push(['匯款金額',existingRec?.payAmt||Math.round(sumRow[7]-sumRow[8])]);
+  rows.push(['匯款日期',payDate]);
+  rows.push(['匯款金額',payAmt]);
   const ws=XLSX.utils.aoa_to_sheet(rows);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'好糰上傳');
-  XLSX.writeFile(wb,`對帳單_${merchant}_${year}年${month}月.xlsx`);
-  notify('✅ 對帳單已匯出');
+  const fn=hasRange
+    ?(df===dt?`對帳單_${merchant}_${df}.xlsx`:`對帳單_${merchant}_${df}_至_${dt}.xlsx`)
+    :`對帳單_${merchant}_${year}年${month}月.xlsx`;
+  XLSX.writeFile(wb,fn);
+  const modeDesc=hasRange?(df===dt?`（${df} 單日）`:`（${df} ~ ${dt}）`):`（${year}年${month}月整月）`;
+  notify(`✅ 對帳單已匯出 ${modeDesc}`);
 }
 function importReconExcel(inp){
   const year=+el('reconYear').value,month=+el('reconMonth').value;
