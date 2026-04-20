@@ -44,12 +44,27 @@
   - 品項永不截斷；footer 統編/備註 fallback 順序 items > 統編 > 備註
   - 中文不斷字、字體自動縮放
 - Excel 匯入/匯出、帳號管理、匯款日期格式
+- **匯入重複訂單防呆（2026-04-20）**
+  - `saveBatchAndGo` 會先呼叫 `findDuplicateOids` 比對既有批次
+  - 有重複 → `showDuplicateDialog` 彈窗，每筆訂單獨立 checkbox 勾選
+  - 勾選 = 用新資料取代（舊批次對應品項移除，空批次自動刪除）
+  - 不勾 = 略過此筆（保留舊資料，新匯入捨棄）
+  - 解決「同筆訂單重複計入預覽分裝表」的 bug
+- **商家已接受按鈕（2026-04-20）**
+  - 資料存 `DB.acceptance[oid] = {accepted, at, by, byPhone, byRole, byBusiness}`
+  - 透過 Firebase + localStorage 同步
+  - 訂單卡片列表：⏳/✅ badge + 一鍵接受按鈕
+  - 訂單詳情頁：大按鈕 + 接受後綠色狀態條顯示接受人/時間/角色
+  - 權限：所有登入者可按「接受」（有紀錄誰按的）；僅管理者可「取消接受」
+  - 貼紙/分裝表/對帳單刻意不動（不影響列印版面）
 
 ---
 
 ## 最近 10 筆 commit
 
 ```
+4d13497 feat: 匯入重複訂單防呆 + 商家已接受按鈕（2026-04-20）
+81e756b docs: 新增 CLAUDE.md 專案記憶
 23f735b feat(sticker): 品項改雙欄排版，解決空間不足截斷問題
 2b68274 fix: PDF 無法列印 — popup onload timing 問題
 992cece fix: 貼紙 footer（統編/備註）被誤隱藏 — 重設 fallback 順序
