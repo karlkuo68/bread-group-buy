@@ -20,6 +20,54 @@
 
 ---
 
+## 🏗️ 架構：兩層儲存（GitHub + Firebase）
+
+**這個系統分兩層，搞清楚才不會找錯地方：**
+
+| 層級 | 儲存位置 | 存什麼 | 更新時機 |
+|---|---|---|---|
+| **程式碼**（介面、功能、邏輯） | **GitHub** | `index.html` 本身（HTML + JS + CSS） | Claude 修改後 `git push` |
+| **使用者資料**（訂單、對帳、已接受狀態） | **Firebase Realtime DB** | 批次、對帳、接受狀態、使用者等 | 使用者在網頁操作時自動寫入 |
+
+### GitHub 那邊（程式）
+- Repo：`https://github.com/karlkuo68/bread-group-buy`
+- 部署：GitHub Pages → `https://karlkuo68.github.io/bread-group-buy/`
+- 修改流程：改 `index.html` → `git add` → `git commit` → `git push origin main`（1-2 分鐘生效）
+
+### Firebase 那邊（資料）
+- Project ID：`bread-group-buy`
+- Database URL：`https://bread-group-buy-default-rtdb.asia-southeast1.firebasedatabase.app`（亞洲東南伺服器）
+- 根節點：`bread/`
+  - `bread/batches/` — 訂單批次（每次匯入產生一筆 `b_時間戳`）
+  - `bread/recons/` — 對帳紀錄（`recon_YYYY_M_商家` 為 key）
+  - `bread/acceptance/` — 商家接受狀態（以 oid 為 key，2026-04-20 新增）
+  - `bread/users/` — 使用者帳號
+  - `bread/merchants/` — 商家清單
+  - `bread/settings/` — 系統設定（QR code、袋量、規則等）
+  - `bread/backups/` — 每日自動備份（保留最近 30 份）
+
+### 資料流（使用者按「接受」時）
+```
+使用者瀏覽器
+    ↓ 載入
+GitHub Pages 的 index.html（程式碼）
+    ↓ 執行
+DB.set('acceptance', {...})
+    ↓ 寫雲端
+Firebase Realtime DB
+    ↓ 即時推播
+其他裝置的 fbRef.on('value') 收到更新
+```
+
+### 重點規則
+- **改程式 → GitHub**（需要 commit + push 才會生效）
+- **使用者資料 → Firebase**（自動同步，不需手動管理）
+- **「永久儲存」指的是 Firebase**（DB.set 就是寫 Firebase）
+- **「程式版本控管」指的是 GitHub**（可回溯任何歷史 commit）
+- **不要把資料放進 index.html**（應永遠透過 DB.get / DB.set 操作 Firebase）
+
+---
+
 ## 專案基本資料
 
 - **部署位址**：https://karlkuo68.github.io/bread-group-buy/
