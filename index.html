@@ -340,6 +340,7 @@ tbody td{padding:8px 11px;vertical-align:top}
       <div id="reconSyncStatus" style="font-size:11px;color:var(--muted);margin-bottom:8px">☁️ Firebase 同步中…</div>
       <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="hidden">
         <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">匯出對帳單 Excel</button>
+        <button class="btn btn-ghost btn-sm" id="btnReconRebuild" onclick="rebuildReconFromBatches()" title="用最新訂單批次重算對帳單（保留調帳/匯款設定）">🔄 重算對帳單</button>
         <label class="btn btn-green btn-sm" id="btnReconImport">匯入對帳單 Excel<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
         <button class="btn btn-primary btn-sm hidden" id="btnReconSend" onclick="sendRecon()">送出對帳單</button>
         <button class="btn btn-primary btn-sm hidden" id="btnReconInvoice" onclick="markInvoiced()">標記發票已開立</button>
@@ -1590,6 +1591,106 @@ function exportReconRangeExcel(){
   notify('✅ 區間 Excel 已匯出');
 }
 function getReconKey(year,month,merchant){return`recon_${year}_${month}_${merchant}`}
+// ═══ 防呆：偵測對帳單 cache 與 batches 是否不一致（避免匯出時用到舊快照）═══
+function detectReconStale(cachedOrders,merchant,year,month){
+  const batches=DB.get('batches',{});
+  const batchOids=new Set();
+  for(const b of Object.values(batches)){
+    if(b.merchant!==merchant)continue;
+    for(const item of (b.items||[])){
+      const d=normDate(item.pickTime);if(!d)continue;
+      const[y,m]=d.split('-').map(Number);
+      if(y!==year||m!==month)continue;
+      batchOids.add(item.oid);
+    }
+  }
+  const cachedOids=new Set((cachedOrders||[]).map(o=>o.oid));
+  const addedOids=[...batchOids].filter(o=>!cachedOids.has(o));
+  const removedOids=[...cachedOids].filter(o=>!batchOids.has(o));
+  // 也檢查金額是否變動（品項新增刪除會改金額）
+  const changedOids=[];
+  const batchAmtByOid={};
+  for(const b of Object.values(batches)){
+    if(b.merchant!==merchant)continue;
+    for(const item of (b.items||[])){
+      const d=normDate(item.pickTime);if(!d)continue;
+      const[y,m]=d.split('-').map(Number);
+      if(y!==year||m!==month)continue;
+      batchAmtByOid[item.oid]=(batchAmtByOid[item.oid]||0)+(item.subtotal||0);
+    }
+  }
+  for(const o of (cachedOrders||[])){
+    if(!batchOids.has(o.oid))continue;// 已在 removedOids 計算過
+    if(batchAmtByOid[o.oid]!==o.amount)changedOids.push(o.oid);
+  }
+  return {
+    stale:addedOids.length>0||removedOids.length>0||changedOids.length>0,
+    addedOids,removedOids,changedOids
+  };
+}
+// 從 batches 重新產生對帳單；preserveMeta=true 會保留 metadata（調帳/匯款/狀態）
+function regenerateReconFromBatches(year,month,merchant,preserveMeta){
+  const key=getReconKey(year,month,merchant);
+  const recons=DB.get('recons',{});
+  const old=recons[key]||{};
+  const batches=DB.get('batches',{});
+  const byOid={};
+  for(const b of Object.values(batches)){
+    if(b.merchant!==merchant)continue;
+    for(const item of (b.items||[])){
+      const d=normDate(item.pickTime);if(!d)continue;
+      const[y,m]=d.split('-').map(Number);
+      if(y!==year||m!==month)continue;
+      if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0,discount:0,base:0,fee:0,recv:0,result:''};
+      byOid[item.oid].amount+=item.subtotal||0;
+    }
+  }
+  const orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
+  orders.forEach(o=>{o.base=o.amount;o.fee=Math.round(o.amount*0.17);o.recv=o.amount-o.fee});
+  // 保留 per-oid 手動調整（如果舊金額未變）
+  if(preserveMeta&&old.orders){
+    const oldByOid={};for(const o of old.orders)oldByOid[o.oid]=o;
+    orders.forEach(o=>{
+      const oo=oldByOid[o.oid];if(!oo)return;
+      if(oo.result)o.result=oo.result;
+      // 只有當金額沒變時才沿用 discount/base/fee/recv 手動調整
+      if(oo.amount===o.amount){
+        if(oo.discount)o.discount=oo.discount;
+        if(oo.base!=null)o.base=oo.base;
+        if(oo.fee!=null)o.fee=oo.fee;
+        if(oo.recv!=null)o.recv=oo.recv;
+      }
+    });
+  }
+  const newRec=preserveMeta?{
+    ...old,orders,
+    status:old.status||'好糰對帳中',
+    discountReason:old.discountReason||'',
+    discountAmt:old.discountAmt||0,
+    payDate:old.payDate||'',
+    payAmt:old.payAmt||0,
+    rebuiltAt:new Date().toLocaleString('zh-TW')
+  }:{orders,status:'好糰對帳中',rebuiltAt:new Date().toLocaleString('zh-TW')};
+  recons[key]=newRec;
+  DB.set('recons',recons);
+  console.log('[regenerateRecon]',key,'orders=',orders.length,'preserveMeta=',preserveMeta);
+  return newRec;
+}
+// 管理者主動按「🔄 重算對帳單」時呼叫
+function rebuildReconFromBatches(){
+  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const merchant=el('reconMerchant').value;
+  if(!merchant){notify('請先選擇商家',true);return}
+  if(!confirm(`確定要用最新訂單重算「${merchant} ${year}年${month}月」對帳單？\n\n✅ 保留：調帳原因/金額、匯款日期/金額、狀態、手動調整欄位（金額未變時）\n🔄 重產：訂單清單（以 batches 為準）`))return;
+  const rec=regenerateReconFromBatches(year,month,merchant,true);
+  if(!rec.orders.length){
+    notify('⚠️ 該月該商家在批次中無訂單，對帳單已清空',true);
+  }else{
+    const total=rec.orders.reduce((s,o)=>s+o.amount,0);
+    notify(`✅ 已重算：${rec.orders.length} 筆訂單，總額 $${total.toLocaleString()}`);
+  }
+  searchRecon();
+}
 function searchRecon(){
   const year=+el('reconYear').value,month=+el('reconMonth').value;
   const merchant=el('reconMerchant').value,statusF=el('reconStatus').value;
@@ -1632,8 +1733,25 @@ function exportReconExcel(){
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請選擇商家',true);return}
   const key=getReconKey(year,month,merchant);
-  const recons=DB.get('recons',{});
-  const existingRec=recons[key];
+  let recons=DB.get('recons',{});
+  let existingRec=recons[key];
+  // 🛡️ 防呆：如果 cache 與 batches 不一致 → 提示是否重算
+  if(existingRec?.orders?.length){
+    const stale=detectReconStale(existingRec.orders,merchant,year,month);
+    if(stale.stale){
+      const fmt=(arr,max=3)=>arr.length?('（'+arr.slice(0,max).join('、')+(arr.length>max?' 等':'')+'）'):'';
+      const msg=`⚠️ 偵測到訂單資料已變動，目前對帳單不是最新：\n\n`+
+        (stale.addedOids.length?`・新增 ${stale.addedOids.length} 筆${fmt(stale.addedOids)}\n`:'')+
+        (stale.removedOids.length?`・刪除 ${stale.removedOids.length} 筆${fmt(stale.removedOids)}\n`:'')+
+        (stale.changedOids.length?`・金額變動 ${stale.changedOids.length} 筆${fmt(stale.changedOids)}\n`:'')+
+        `\n要用最新訂單重算對帳單再匯出嗎？\n\n✅ 是 = 重算（保留調帳/匯款/狀態設定）← 建議\n❌ 否 = 用舊資料匯出`;
+      if(confirm(msg)){
+        existingRec=regenerateReconFromBatches(year,month,merchant,true);
+        recons=DB.get('recons',{});
+        notify('✅ 已依最新訂單重算，即將匯出');
+      }
+    }
+  }
   const header=['取件日期','星期','訂單ID','主聯絡人','外送地址','商品總金額','好糰折扣','服務費計算基礎','服務費','應收','對帳結果 預設正確'];
   const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
   const rows=[header];

@@ -98,6 +98,13 @@ Firebase Realtime DB
   - 勾選 = 用新資料取代（舊批次對應品項移除，空批次自動刪除）
   - 不勾 = 略過此筆（保留舊資料，新匯入捨棄）
   - 解決「同筆訂單重複計入預覽分裝表」的 bug
+- **匯出對帳單過期 cache 防呆（2026-04-20）**
+  - 症狀：刪除訂單後重新匯入，匯出對帳單 Excel 仍是舊資料
+  - 根因：`recons[key]` 被 importReconExcel / sendRecon / markInvoiced 儲存成快照後，exportReconExcel 就一直用舊資料不重讀 batches
+  - 修復：`exportReconExcel` 開頭呼叫 `detectReconStale` 比對 batches vs cache 的 oid 與金額，不一致時 confirm 提示「偵測到訂單資料已變動，要用最新訂單重算嗎？」
+  - 新增手動按鈕：對帳頁多一顆 `🔄 重算對帳單`（在匯出旁），管理者可主動重算
+  - 重算邏輯：`regenerateReconFromBatches(year,month,merchant,preserveMeta=true)` — 用 batches 重產 orders，保留頂層 metadata（status/discountReason/discountAmt/payDate/payAmt）與 per-oid 手動調整（當金額沒變時）
+  - 關鍵函式：`detectReconStale`, `regenerateReconFromBatches`, `rebuildReconFromBatches`
 - **對帳頁日期區間查詢（2026-04-20）**
   - 既有月份查詢上方新增日期區間輸入（from ~ to）
   - 快捷鈕：「上半月(1-15)」「下半月(16-月底)」「清除」（只填日期不自動搜尋）
@@ -119,6 +126,7 @@ Firebase Realtime DB
 ## 最近 10 筆 commit
 
 ```
+（下個 commit）fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
 97fb772 feat(recon): 對帳頁日期區間查詢 + 上半月/下半月快捷 + Firebase 同步狀態（2026-04-20）
 4d13497 feat: 匯入重複訂單防呆 + 商家已接受按鈕（2026-04-20）
 81e756b docs: 新增 CLAUDE.md 專案記憶
