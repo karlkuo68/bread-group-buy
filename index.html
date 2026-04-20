@@ -709,10 +709,170 @@ function saveBatchAndGo(){
   if(!G.items.length){notify('無資料',true);return}
   const merchant=el('batchMerchant').value;
   if(!merchant){notify('請先選擇所屬商家',true);return}
+  // 防呆：檢查與既有批次的 oid 是否重複
+  const dups=findDuplicateOids(G.items);
+  if(dups.length){showDuplicateDialog(dups,merchant);return}
+  _doSaveBatch(merchant,G.items);
+}
+// 實際寫入批次的邏輯（從 saveBatchAndGo 抽出，供重複對話框確認後呼叫）
+function _doSaveBatch(merchant,items){
+  if(!items||!items.length){notify('沒有可儲存的品項',true);return}
   const batches=DB.get('batches',{});const id='b_'+Date.now();
-  G.items.forEach(r=>r.merchant=merchant);
-  batches[id]={id,savedAt:new Date().toLocaleString('zh-TW'),savedBy:IMPORT_META.importedBy,fileName:IMPORT_META.fileName||'',merchant:merchant,oids:[...new Set(G.items.map(r=>r.oid))],items:G.items};
-  DB.set('batches',batches);notify(`✅ 已儲存（商家：${merchant}）`);G.items=[];el('importResult').classList.add('hidden');switchTab('orders');
+  items.forEach(r=>r.merchant=merchant);
+  batches[id]={id,savedAt:new Date().toLocaleString('zh-TW'),savedBy:IMPORT_META.importedBy,fileName:IMPORT_META.fileName||'',merchant:merchant,oids:[...new Set(items.map(r=>r.oid))],items:items};
+  DB.set('batches',batches);
+  notify(`✅ 已儲存（商家：${merchant}）`);
+  G.items=[];el('importResult').classList.add('hidden');switchTab('orders');
+}
+// ═══ 防呆：重複訂單偵測 ═══
+function findDuplicateOids(newItems){
+  const batches=DB.get('batches',{});
+  const newOidSet=new Set(newItems.map(r=>r.oid));
+  const newStats={};
+  for(const r of newItems){
+    if(!newStats[r.oid])newStats[r.oid]={items:0,qty:0,amt:0,buyer:r.buyer||''};
+    newStats[r.oid].items++;newStats[r.oid].qty+=r.qty||0;newStats[r.oid].amt+=r.subtotal||0;
+  }
+  const dups=[];
+  for(const oid of newOidSet){
+    const oldBatches=[];
+    for(const[bid,b]of Object.entries(batches)){
+      if(!b.oids||!b.oids.includes(oid))continue;
+      const oldItems=(b.items||[]).filter(r=>r.oid===oid);
+      if(!oldItems.length)continue;
+      oldBatches.push({
+        bid,fileName:b.fileName||'未命名',savedAt:b.savedAt||'',merchant:b.merchant||'',
+        items:oldItems.length,
+        qty:oldItems.reduce((s,r)=>s+(r.qty||0),0),
+        amt:oldItems.reduce((s,r)=>s+(r.subtotal||0),0),
+        buyer:oldItems[0].buyer||''
+      });
+    }
+    if(oldBatches.length){
+      const ns=newStats[oid];
+      dups.push({oid,oldBatches,newBuyer:ns.buyer,newItems:ns.items,newQty:ns.qty,newAmt:ns.amt});
+    }
+  }
+  return dups;
+}
+function showDuplicateDialog(dups,merchant){
+  document.getElementById('dupOverlay')?.remove();
+  const ov=document.createElement('div');
+  ov.id='dupOverlay';
+  ov.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
+  const rows=dups.map(d=>{
+    const oldInfo=d.oldBatches.map(ob=>`<div style="font-size:11px;color:var(--muted);line-height:1.5">📦 ${ob.fileName} · ${ob.savedAt} · ${ob.merchant}<br>&nbsp;&nbsp;&nbsp;&nbsp;舊：${ob.buyer} / ${ob.items}品項 / ${ob.qty}個 / $${ob.amt.toLocaleString()}</div>`).join('');
+    return`<div style="border:1px solid var(--warm);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:var(--light)">
+      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" class="dup-chk" data-oid="${d.oid}" checked style="margin-top:3px;width:16px;height:16px;cursor:pointer">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-family:'DM Mono',monospace;color:var(--crust)">${d.oid}</div>
+          ${oldInfo}
+          <div style="font-size:12px;color:var(--green);font-weight:600;margin-top:4px">新：${d.newBuyer} / ${d.newItems}品項 / ${d.newQty}個 / $${d.newAmt.toLocaleString()}</div>
+        </div>
+      </label>
+    </div>`;
+  }).join('');
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;width:100%;max-width:560px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;font-size:17px;color:var(--crust);margin-bottom:4px">⚠️ 發現 ${dups.length} 筆重複訂單</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5">
+      勾選 = <strong style="color:var(--bread)">用新資料取代</strong>（舊批次中該訂單會被移除）<br>
+      不勾 = <strong style="color:var(--muted)">略過此筆</strong>（保留舊資料，新匯入捨棄此訂單）
+    </div>
+    <div style="flex:1;overflow-y:auto;max-height:50vh;padding-right:4px">${rows}</div>
+    <div style="display:flex;gap:6px;justify-content:space-between;margin-top:14px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="dupToggleAll(true)">全部取代</button>
+        <button class="btn btn-ghost btn-sm" onclick="dupToggleAll(false)">全部略過</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="dupCancel()">取消匯入</button>
+        <button class="btn btn-primary btn-sm" onclick="dupConfirm('${merchant}')">確認處理</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+// ═══ 商家接單狀態（ACCEPTANCE） ═══
+function getAcceptance(oid){const acc=DB.get('acceptance',{});return acc[oid]||null}
+function acceptOrder(oid,ev){
+  if(ev){ev.stopPropagation();ev.preventDefault()}
+  if(!CUR){notify('請先登入',true);return}
+  if(getAcceptance(oid)){notify('此訂單已被接受',true);return}
+  const acc=DB.get('acceptance',{});
+  acc[oid]={accepted:true,at:new Date().toLocaleString('zh-TW'),by:CUR.nickname||CUR.phone||'未知',byPhone:CUR.phone||'',byRole:CUR.role||'',byBusiness:CUR.businessName||''};
+  DB.set('acceptance',acc);
+  notify(`✅ 已接受訂單 ${oid}`);
+  _reRenderAfterAccept(oid);
+}
+function unacceptOrder(oid,ev){
+  if(ev){ev.stopPropagation();ev.preventDefault()}
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以取消接受',true);return}
+  const a=getAcceptance(oid);if(!a){notify('此訂單尚未接受',true);return}
+  if(!confirm(`確定取消「${oid}」的已接受狀態嗎？\n原接受人：${a.by}（${a.at}）`))return;
+  const acc=DB.get('acceptance',{});delete acc[oid];DB.set('acceptance',acc);
+  notify(`已取消「${oid}」的接受狀態`);
+  _reRenderAfterAccept(oid);
+}
+function _reRenderAfterAccept(oid){
+  const det=el('orderDetail');
+  if(det&&!det.classList.contains('hidden')&&G.viewItems&&G.viewItems[0]?.oid===oid){viewOrder(oid);return}
+  if(G.searchItems&&G.searchItems.length)showOrderCards(G.searchItems);
+}
+function accBadgeHTML(oid){
+  const a=getAcceptance(oid);
+  if(a){
+    const when=a.at.length>10?a.at.slice(5,16):a.at;
+    const who=a.byBusiness||a.by;
+    const unacceptBtn=isAdmin(CUR?.role)?`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="unacceptOrder('${oid}',event)">取消</button>`:'';
+    return`<span style="display:inline-flex;align-items:center;background:var(--green);color:#fff;font-size:11px;padding:3px 8px;border-radius:12px;font-weight:600">✅ 已接受 · ${when} · ${who}</span>${unacceptBtn}`;
+  }
+  const btn=CUR?`<button class="btn btn-primary btn-sm" style="padding:3px 10px;font-size:11px;margin-left:6px" onclick="acceptOrder('${oid}',event)">✅ 接受</button>`:'';
+  return`<span style="display:inline-flex;align-items:center;background:#f0e6d2;color:var(--crust);font-size:11px;padding:3px 8px;border-radius:12px;font-weight:600">⏳ 待商家接受</span>${btn}`;
+}
+function accDetailBarHTML(oid){
+  const a=getAcceptance(oid);
+  if(a){
+    const unacceptBtn=isAdmin(CUR?.role)?`<button class="btn btn-ghost btn-sm" onclick="unacceptOrder('${oid}')">取消接受（管理者）</button>`:'';
+    return`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--green);color:#fff;border-radius:8px;margin:10px 0;flex-wrap:wrap">
+      <span style="font-size:22px">✅</span>
+      <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">商家已接受此訂單（製作中）</div><div style="font-size:12px;opacity:.92;margin-top:2px">${a.byBusiness?a.byBusiness+' · ':''}${a.by}（${RL[a.byRole]||a.byRole||''}） · ${a.at}</div></div>
+      ${unacceptBtn}
+    </div>`;
+  }
+  const btn=CUR?`<button class="btn btn-primary" onclick="acceptOrder('${oid}')" style="min-width:180px">✅ 商家確認接單（已在製作中）</button>`:'';
+  return`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#fdf4e3;border:1.5px dashed var(--bread);border-radius:8px;margin:10px 0;flex-wrap:wrap">
+    <span style="font-size:22px">⏳</span>
+    <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:var(--crust)">等候商家確認接單</div><div style="font-size:12px;color:var(--muted);margin-top:2px">按下按鈕後系統會記錄接受人與時間</div></div>
+    ${btn}
+  </div>`;
+}
+function dupToggleAll(v){document.querySelectorAll('#dupOverlay .dup-chk').forEach(c=>c.checked=v)}
+function dupCancel(){document.getElementById('dupOverlay')?.remove();notify('已取消匯入')}
+function dupConfirm(merchant){
+  const chks=document.querySelectorAll('#dupOverlay .dup-chk');
+  const replaceOids=new Set(),skipOids=new Set();
+  chks.forEach(c=>{const oid=c.dataset.oid;if(c.checked)replaceOids.add(oid);else skipOids.add(oid)});
+  if(replaceOids.size){
+    const batches=DB.get('batches',{});let removed=0;
+    for(const[bid,b]of Object.entries(batches)){
+      if(!b.oids||!b.oids.some(o=>replaceOids.has(o)))continue;
+      const keep=(b.items||[]).filter(r=>!replaceOids.has(r.oid));
+      removed+=(b.items||[]).length-keep.length;
+      if(!keep.length){delete batches[bid]}
+      else{b.items=keep;b.oids=[...new Set(keep.map(r=>r.oid))]}
+    }
+    DB.set('batches',batches);
+    console.log('[antidup] 取代 '+removed+' 筆舊品項，oids=',[...replaceOids]);
+  }
+  let finalItems=G.items;
+  if(skipOids.size)finalItems=G.items.filter(r=>!skipOids.has(r.oid));
+  document.getElementById('dupOverlay')?.remove();
+  if(!finalItems.length){
+    notify('所有訂單都選擇略過，沒有新資料可儲存',true);
+    G.items=[];el('importResult').classList.add('hidden');return;
+  }
+  _doSaveBatch(merchant,finalItems);
 }
 function delBatch(id){const b=DB.get('batches',{});delete b[id];DB.set('batches',b);showAllBatches();notify('已刪除')}
 function changeBatchMerchant(id){
@@ -827,6 +987,7 @@ function showOrderCards(items){
         <span>📍 ${o.addr||'無地址'}</span>
         ${o.note?`<span>📝 ${o.note.length>15?o.note.slice(0,15)+'…':o.note}</span>`:''}
       </div>
+      <div style="padding:2px 14px 8px;display:flex;align-items:center;flex-wrap:wrap;gap:4px" onclick="event.stopPropagation()">${accBadgeHTML(oid)}</div>
     </div>`;
   }
   html+=`<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="showAllBatches()">← 返回批次列表</button></div>`;
@@ -860,6 +1021,7 @@ function viewOrder(oid){
       <span class="detail-label">總金額</span><span class="detail-val" style="color:var(--bread);font-weight:700">$${tA.toLocaleString()}</span>
       ${personCount>1?`<span class="detail-label">取件人數</span><span class="detail-val">${personCount} 位</span>`:''}
     </div>
+    ${accDetailBarHTML(oid)}
     <div class="tbl-wrap" id="detailTable"></div>
     <div class="btn-row">
       <button class="btn btn-blue" onclick="showStickers(G.viewItems)">🏷️ 預覽貼紙</button>
