@@ -326,6 +326,18 @@ tbody td{padding:8px 11px;vertical-align:top}
         </select>
         <button class="btn btn-primary btn-sm" onclick="searchRecon()">查詢</button>
       </div>
+      <!-- 日期區間篩選（選填）+ 快捷鈕 -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--warm);border-radius:8px">
+        <div style="font-size:12px;color:var(--crust);font-weight:700;min-width:fit-content">📅 日期區間</div>
+        <input type="date" class="select-in" id="reconDateFrom" style="width:150px">
+        <span style="color:var(--muted)">~</span>
+        <input type="date" class="select-in" id="reconDateTo" style="width:150px">
+        <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(1)" title="把本頁年月的 1-15 日填入區間欄位">上半月 (1-15)</button>
+        <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(2)" title="把本頁年月的 16-月底 填入區間欄位">下半月 (16-月底)</button>
+        <button class="btn btn-ghost btn-sm" onclick="reconClearDateRange()">清除</button>
+        <button class="btn btn-primary btn-sm" onclick="searchReconRange()">🔍 搜尋區間訂單</button>
+      </div>
+      <div id="reconSyncStatus" style="font-size:11px;color:var(--muted);margin-bottom:8px">☁️ Firebase 同步中…</div>
       <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="hidden">
         <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">匯出對帳單 Excel</button>
         <label class="btn btn-green btn-sm" id="btnReconImport">匯入對帳單 Excel<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
@@ -333,6 +345,8 @@ tbody td{padding:8px 11px;vertical-align:top}
         <button class="btn btn-primary btn-sm hidden" id="btnReconInvoice" onclick="markInvoiced()">標記發票已開立</button>
       </div>
       <div id="reconList"></div>
+      <!-- 區間查詢結果 -->
+      <div id="reconRangeCard" class="hidden" style="margin-top:14px;padding-top:14px;border-top:2px solid var(--warm)"></div>
     </div>
     <!-- 商家對帳視圖 -->
     <div class="card hidden" id="merchantReconCard">
@@ -441,17 +455,28 @@ async function initFirebase(){
   const snap=await fbRef.once('value');
   const data=snap.val()||{};
   Object.assign(_cache,data);
+  _markSynced();
   // Real-time sync for cross-device updates
   fbRef.on('value',snap=>{
     const d=snap.val()||{};
     Object.keys(_cache).forEach(k=>{if(!d.hasOwnProperty(k))delete _cache[k]});
     Object.assign(_cache,d);
+    _markSynced();
   });
 }
+// Firebase 同步時間戳（讓 UI 可以顯示「已永久儲存・上次同步 …」）
+function _markSynced(){
+  try{
+    if(typeof G!=='undefined')G._lastSyncAt=new Date().toLocaleString('zh-TW');
+    if(typeof updateSyncStatus==='function')updateSyncStatus();
+  }catch(e){}
+}
+window.addEventListener('online',()=>{if(typeof updateSyncStatus==='function')updateSyncStatus()});
+window.addEventListener('offline',()=>{if(typeof updateSyncStatus==='function')updateSyncStatus()});
 // Refresh data when user returns to tab
 document.addEventListener('visibilitychange',async()=>{
   if(document.visibilityState==='visible'&&fbRef&&CUR){
-    try{const snap=await fbRef.once('value');const d=snap.val()||{};Object.keys(_cache).forEach(k=>{if(!d.hasOwnProperty(k))delete _cache[k]});Object.assign(_cache,d);showAllBatches()}catch(e){console.warn('sync error',e)}
+    try{const snap=await fbRef.once('value');const d=snap.val()||{};Object.keys(_cache).forEach(k=>{if(!d.hasOwnProperty(k))delete _cache[k]});Object.assign(_cache,d);_markSynced();showAllBatches()}catch(e){console.warn('sync error',e)}
   }
 });
 
@@ -1447,7 +1472,122 @@ function initReconPage(){
   // 管理者顯示匯出/匯入按鈕，商家隱藏
   el('reconActions').classList.toggle('hidden',CUR?.role==='merchant');
   el('merchantReconCard').classList.add('hidden');
+  el('reconRangeCard').classList.add('hidden');
+  el('reconDateFrom').value='';el('reconDateTo').value='';
+  updateSyncStatus();
   searchRecon();
+}
+// ═══ 對帳頁：Firebase 同步狀態顯示 ═══
+function updateSyncStatus(){
+  const x=el('reconSyncStatus');if(!x)return;
+  if(!navigator.onLine){x.innerHTML='🔴 目前離線中（資料會在恢復連線後自動同步到 Firebase）';x.style.color='var(--red)';return}
+  const at=(typeof G!=='undefined')?G._lastSyncAt:null;
+  if(!at){x.innerHTML='☁️ Firebase 同步中…';x.style.color='var(--muted)';return}
+  x.innerHTML=`☁️ 已永久儲存於 Firebase（上次同步：<strong style="color:var(--green);font-family:'DM Mono',monospace">${at}</strong>）`;
+  x.style.color='var(--muted)';
+}
+// ═══ 對帳頁：日期區間快捷 ═══
+function reconSetHalfMonth(half){
+  const y=+el('reconYear').value,m=+el('reconMonth').value;
+  if(!y||!m){notify('請先選擇年 / 月',true);return}
+  const p=n=>String(n).padStart(2,'0');
+  if(half===1){
+    el('reconDateFrom').value=`${y}-${p(m)}-01`;
+    el('reconDateTo').value=`${y}-${p(m)}-15`;
+    notify(`已填入 ${y}/${m} 上半月，請按「搜尋區間訂單」`);
+  }else{
+    const lastDay=new Date(y,m,0).getDate();
+    el('reconDateFrom').value=`${y}-${p(m)}-16`;
+    el('reconDateTo').value=`${y}-${p(m)}-${p(lastDay)}`;
+    notify(`已填入 ${y}/${m} 下半月（16-${lastDay}），請按「搜尋區間訂單」`);
+  }
+}
+function reconClearDateRange(){
+  el('reconDateFrom').value='';el('reconDateTo').value='';
+  el('reconRangeCard').classList.add('hidden');
+  if(typeof G!=='undefined')G._reconRange=null;
+}
+function searchReconRange(){
+  const merchant=el('reconMerchant').value;
+  const df=el('reconDateFrom').value,dt=el('reconDateTo').value;
+  if(!merchant){notify('請先選擇商家',true);return}
+  if(!df&&!dt){notify('請選擇日期（單日請填相同日期，或用上半月/下半月快捷鈕）',true);return}
+  const dfUse=df||dt,dtUse=dt||df;// 允許單日（from=to）
+  if(dfUse>dtUse){notify('起始日期不能晚於結束日期',true);return}
+  const batches=DB.get('batches',{});
+  const byOid={};
+  for(const b of Object.values(batches)){
+    if(b.merchant!==merchant)continue;
+    for(const item of (b.items||[])){
+      const d=normDate(item.pickTime);if(!d)continue;
+      if(d<dfUse||d>dtUse)continue;
+      if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0,qty:0,items:0};
+      byOid[item.oid].amount+=item.subtotal||0;
+      byOid[item.oid].qty+=item.qty||0;
+      byOid[item.oid].items+=1;
+    }
+  }
+  const orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
+  renderReconRange(orders,merchant,dfUse,dtUse);
+}
+function renderReconRange(orders,merchant,df,dt){
+  const card=el('reconRangeCard');
+  const rangeLabel=(df===dt)?`${df}（單日）`:`${df} ~ ${dt}`;
+  if(!orders.length){
+    card.innerHTML=`<div style="font-weight:700;font-size:14px;color:var(--crust);margin-bottom:6px">📅 ${merchant} · ${rangeLabel}</div><div class="empty-state" style="padding:28px 10px"><div class="empty-icon">📭</div><div>此區間查無訂單</div></div>`;
+    card.classList.remove('hidden');card.scrollIntoView({behavior:'smooth'});
+    if(typeof G!=='undefined')G._reconRange=null;
+    return;
+  }
+  const totalAmt=orders.reduce((s,o)=>s+o.amount,0);
+  const totalQty=orders.reduce((s,o)=>s+o.qty,0);
+  const fee=Math.round(totalAmt*0.17);
+  const recv=totalAmt-fee;
+  const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+  let html=`<div style="font-weight:700;font-size:15px;color:var(--crust);margin-bottom:8px">📅 ${merchant} · ${rangeLabel} · 區間訂單明細</div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:13px;padding:8px 12px;background:var(--light);border-radius:6px">
+      <span><span style="color:var(--muted)">訂單 </span><strong style="color:var(--crust);font-family:'DM Mono',monospace">${orders.length}</strong> 筆</span>
+      <span><span style="color:var(--muted)">總品項 </span><strong style="color:var(--bread);font-family:'DM Mono',monospace">${totalQty}</strong> 個</span>
+      <span><span style="color:var(--muted)">商品總額 </span><strong style="color:var(--green);font-family:'DM Mono',monospace">$${totalAmt.toLocaleString()}</strong></span>
+      <span><span style="color:var(--muted)">服務費(17%) </span><strong style="font-family:'DM Mono',monospace">$${fee.toLocaleString()}</strong></span>
+      <span><span style="color:var(--muted)">應收 </span><strong style="color:var(--crust);font-family:'DM Mono',monospace">$${recv.toLocaleString()}</strong></span>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th style="width:36px">#</th><th>取件日期</th><th style="width:40px;text-align:center">週</th><th>訂單ID</th><th>訂購人</th><th>地址</th><th style="text-align:right">金額</th></tr></thead><tbody>`;
+  orders.forEach((o,i)=>{
+    const d=normDate(o.pickTime)||o.pickTime;
+    const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
+    html+=`<tr><td class="td-mono">${i+1}</td><td style="font-family:'DM Mono',monospace">${d}</td><td style="text-align:center">${wk}</td><td class="td-mono">${o.oid}</td><td>${o.buyer||''}</td><td style="font-size:12px">${o.addr||''}</td><td style="text-align:right;font-family:'DM Mono',monospace">$${o.amount.toLocaleString()}</td></tr>`;
+  });
+  html+=`<tr style="border-top:2px solid var(--bread);font-weight:700"><td colspan="6" style="text-align:right">合計</td><td style="text-align:right;font-family:'DM Mono',monospace;color:var(--bread)">$${totalAmt.toLocaleString()}</td></tr></tbody></table></div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn btn-primary btn-sm" onclick="exportReconRangeExcel()">⬇️ 匯出此區間 Excel</button>
+      <button class="btn btn-ghost btn-sm" onclick="reconClearDateRange()">關閉</button>
+    </div>`;
+  card.innerHTML=html;card.classList.remove('hidden');
+  if(typeof G!=='undefined')G._reconRange={merchant,df,dt,orders,totalAmt,totalQty,fee,recv};
+  card.scrollIntoView({behavior:'smooth'});
+}
+function exportReconRangeExcel(){
+  const r=(typeof G!=='undefined')?G._reconRange:null;
+  if(!r){notify('沒有區間資料，請先搜尋',true);return}
+  const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+  const header=['取件日期','星期','訂單ID','訂購人','外送地址','品項數','金額','服務費(17%)','應收'];
+  const rows=[header];
+  r.orders.forEach(o=>{
+    const d=normDate(o.pickTime)||o.pickTime;
+    const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
+    const fee=Math.round(o.amount*0.17);
+    rows.push([d,wk,o.oid,o.buyer||'',o.addr||'',o.qty,o.amount,fee,o.amount-fee]);
+  });
+  rows.push([]);
+  rows.push(['合計','','','','',r.totalQty,r.totalAmt,r.fee,r.recv]);
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:12},{wch:6},{wch:14},{wch:12},{wch:22},{wch:8},{wch:10},{wch:12},{wch:10}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'區間明細');
+  const fn=(r.df===r.dt)?`對帳明細_${r.merchant}_${r.df}.xlsx`:`對帳明細_${r.merchant}_${r.df}_至_${r.dt}.xlsx`;
+  XLSX.writeFile(wb,fn);
+  notify('✅ 區間 Excel 已匯出');
 }
 function getReconKey(year,month,merchant){return`recon_${year}_${month}_${merchant}`}
 function searchRecon(){
