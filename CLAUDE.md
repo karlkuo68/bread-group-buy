@@ -50,6 +50,14 @@
   - 勾選 = 用新資料取代（舊批次對應品項移除，空批次自動刪除）
   - 不勾 = 略過此筆（保留舊資料，新匯入捨棄）
   - 解決「同筆訂單重複計入預覽分裝表」的 bug
+- **對帳頁日期區間查詢（2026-04-20）**
+  - 既有月份查詢上方新增日期區間輸入（from ~ to）
+  - 快捷鈕：「上半月(1-15)」「下半月(16-月底)」「清除」（只填日期不自動搜尋）
+  - 「搜尋區間訂單」按鈕顯示該商家該區間的訂單明細 + 小計 + 匯出 Excel
+  - 支援單日查詢（只填一個日期即可）
+  - 對帳頁上方顯示 Firebase 同步狀態：「☁️ 已永久儲存（上次同步：時間）」
+  - 離線時切紅色警示；監聽 online/offline 事件即時更新
+  - 關鍵函式：`reconSetHalfMonth`, `searchReconRange`, `renderReconRange`, `exportReconRangeExcel`, `updateSyncStatus`, `_markSynced`
 - **商家已接受按鈕（2026-04-20）**
   - 資料存 `DB.acceptance[oid] = {accepted, at, by, byPhone, byRole, byBusiness}`
   - 透過 Firebase + localStorage 同步
@@ -63,6 +71,7 @@
 ## 最近 10 筆 commit
 
 ```
+97fb772 feat(recon): 對帳頁日期區間查詢 + 上半月/下半月快捷 + Firebase 同步狀態（2026-04-20）
 4d13497 feat: 匯入重複訂單防呆 + 商家已接受按鈕（2026-04-20）
 81e756b docs: 新增 CLAUDE.md 專案記憶
 23f735b feat(sticker): 品項改雙欄排版，解決空間不足截斷問題
