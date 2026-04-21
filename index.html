@@ -2037,11 +2037,7 @@ function downloadReconExcel(key){
     const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
     // 確保有 serial（若舊資料沒有就補一個）
     if(!rec.serial){rec.serial=genReconSerial();DB.set('recons',recons)}
-    const rows=[];
-    // metadata 列（重新匯入時會被偵測為相同序號 → 詢問覆蓋）
-    rows.push(['對帳單序號',rec.serial,'商家',mt,'區間',df===dt?df:`${df} ~ ${dt}`]);
-    rows.push([]);
-    rows.push(header);
+    const rows=[header];
     const orders=rec.orders||[];
     orders.forEach(o=>{
       const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
@@ -2066,10 +2062,13 @@ function downloadReconExcel(key){
     rows.push([]);
     rows.push(['匯款日期',rec.payDate||'']);
     rows.push(['匯款金額',rec.payAmt||Math.round(sumRow[7]-sumRow[8]+discAmt)]);
+    // 序號：放在檔案最下方，不動原本結構；匯入時可被 importReconExcel 偵測
+    rows.push([]);
+    rows.push(['對帳單序號',rec.serial]);
     const ws=XLSX.utils.aoa_to_sheet(rows);
     const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'對帳單');
     XLSX.writeFile(wb,`對帳單_${mt}_${rangeLabel}.xlsx`);
-    notify(`✅ 已下載：${mt} · ${rangeLabel}`);
+    notify(`✅ 已下載：${mt} · ${rangeLabel}（序號 ${rec.serial}）`);
   }catch(e){notify('下載失敗：'+e.message,true);console.error(e)}
 }
 // ═══ 資料庫查詢（已封存對帳單）═══
@@ -2473,9 +2472,9 @@ function importReconExcel(inp){
     const ws=wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(ws,{header:1});
     if(rows.length<2){notify('檔案無資料',true);inp.value='';return}
-    // 掃描序號（從前幾列找「對帳單序號」）
+    // 掃描序號（序號放在 Excel 最下方，掃全部列找「對帳單序號」）
     let importSerial='';
-    for(let i=0;i<Math.min(rows.length,6);i++){
+    for(let i=0;i<rows.length;i++){
       const r=rows[i]||[];
       for(let j=0;j<r.length;j++){
         if(String(r[j]||'').trim()==='對帳單序號'){importSerial=String(r[j+1]||'').trim();break}
