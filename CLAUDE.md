@@ -109,6 +109,12 @@ Firebase Realtime DB
   - 修正：`searchRecon` 最後若有日期區間 + 商家，自動連帶呼叫 `searchReconRange`（按「查詢」就會同時列出對帳紀錄 + 區間訂單）
   - 修正：`viewReconDetail` / `viewMerchantReconDetail` 的 rec.year/month/merchant 欄位若缺，改用 `parseReconKey(key)` 推回（避免顯示 undefined）
   - 修正：`regenerateReconFromBatches` 寫入 recon 時補上 `year/month/merchant` 欄位，日後新資料就完整
+- **貼紙 PDF 末頁空白修正（2026-04-21）**
+  - 症狀：列印貼紙 PDF 有時最末頁是完全空白（有些訂單有、有些沒有）
+  - 根因：`.stk{page-break-after:always}` 在最後一張貼紙也觸發，瀏覽器依語義多印一張空白
+  - 修復：三處 CSS 都加 `.stk:last-child{page-break-after:auto;break-after:auto}`
+  - 同時加現代 `break-after` 屬性增加跨瀏覽器相容
+  - 其餘貼紙生成邏輯完全不動
 - **商家詳細資料 + 自我編輯（2026-04-21）**
   - 新資料結構：`DB.merchantsInfo` = `{[商家名]: {title, taxId, pickupAddr, contactName, contactPhone, contactEmail, bankName, bankBranch, bankAccount, accountHolder, passbookImage, passbookFileName, notes, updatedAt, updatedBy}}`
   - 原本的 `merchants` 仍是名稱清單，不動
@@ -212,6 +218,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+7385642 fix(sticker): 貼紙 PDF 末頁空白 — 最後一張不強制分頁（2026-04-21）
 5c617bd feat(merchant): 商家詳細資料 + 自我編輯（抬頭/統編/取貨/聯絡/撥款/帳簿）（2026-04-21）
 494efe6 refactor(recon): 對帳 key 改為區間制，同商家可多筆（2026-04-21）
 eba0d08 fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
