@@ -109,6 +109,21 @@ Firebase Realtime DB
   - 修正：`searchRecon` 最後若有日期區間 + 商家，自動連帶呼叫 `searchReconRange`（按「查詢」就會同時列出對帳紀錄 + 區間訂單）
   - 修正：`viewReconDetail` / `viewMerchantReconDetail` 的 rec.year/month/merchant 欄位若缺，改用 `parseReconKey(key)` 推回（避免顯示 undefined）
   - 修正：`regenerateReconFromBatches` 寫入 recon 時補上 `year/month/merchant` 欄位，日後新資料就完整
+- **對帳作業改為「生成」流程 + 資料庫查詢封存頁（2026-04-21）**
+  - 舊：「🔍 搜尋區間訂單」只顯示訂單卡，不寫入
+  - 新：「🧾 生成對帳單」按下去把區間內訂單融合寫入 recons[key]，直接加到歷史紀錄
+  - 已存在同區間對帳單 → confirm 覆蓋；已封存的不能覆蓋，要先取消封存
+  - 歷史紀錄區每筆操作按鈕（admin）：查看明細 / ⬇️ 下載 / 📦 封存 / 標記發票已開立 / ✕ 刪除
+  - 商家角色：只有查看明細 + ⬇️ 下載
+  - 客服 cs：查看明細 + ⬇️ 下載（不能改不能刪）
+  - 新增 tab「📚 資料庫查詢」= page-archive
+  - searchArchive 只顯示 `rec.archivedAt` 有值的 recons
+  - 篩選：商家 / 年份 / 狀態 / 訂單關鍵字（搜 oid 或 buyer）
+  - 封存欄位：`rec.archivedAt`, `rec.archivedBy`
+  - 取消封存（僅 admin）：拿回對帳作業工作區
+  - 刪除（僅 admin）：永久刪除，對封存中的會多一層 confirm
+  - searchRecon 自動過濾 `archivedAt` 有值的紀錄（只顯示工作區）
+  - 關鍵函式：`generateRecon`, `archiveRecon`, `unarchiveRecon`, `delRecon`, `downloadReconExcel`, `initArchivePage`, `searchArchive`
 - **貼紙 PDF 末頁空白修正（2026-04-21）**
   - 症狀：列印貼紙 PDF 有時最末頁是完全空白（有些訂單有、有些沒有）
   - 根因：`.stk{page-break-after:always}` 在最後一張貼紙也觸發，瀏覽器依語義多印一張空白
@@ -218,6 +233,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+（下個 commit）refactor(recon): 對帳改為「生成」流程 + 新增資料庫查詢封存頁（2026-04-21）
 7385642 fix(sticker): 貼紙 PDF 末頁空白 — 最後一張不強制分頁（2026-04-21）
 5c617bd feat(merchant): 商家詳細資料 + 自我編輯（抬頭/統編/取貨/聯絡/撥款/帳簿）（2026-04-21）
 494efe6 refactor(recon): 對帳 key 改為區間制，同商家可多筆（2026-04-21）

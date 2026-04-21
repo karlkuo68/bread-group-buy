@@ -232,6 +232,7 @@ tbody td{padding:8px 11px;vertical-align:top}
     <div class="tab active" onclick="switchTab('import')" id="tab-import">① 匯入訂單</div>
     <div class="tab" onclick="switchTab('orders')" id="tab-orders">📋 訂單查詢</div>
     <div class="tab" onclick="switchTab('recon')" id="tab-recon">💰 對帳作業</div>
+    <div class="tab" onclick="switchTab('archive')" id="tab-archive">📚 資料庫查詢</div>
     <div class="tab" onclick="switchTab('settings')" id="tab-settings">⚙️ 設定</div>
   </div>
 
@@ -335,7 +336,7 @@ tbody td{padding:8px 11px;vertical-align:top}
         <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(1)" title="把本頁年月的 1-15 日填入區間欄位">上半月 (1-15)</button>
         <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(2)" title="把本頁年月的 16-月底 填入區間欄位">下半月 (16-月底)</button>
         <button class="btn btn-ghost btn-sm" onclick="reconClearDateRange()">清除</button>
-        <button class="btn btn-primary btn-sm" onclick="searchReconRange()">🔍 搜尋區間訂單</button>
+        <button class="btn btn-primary btn-sm" onclick="generateRecon()">🧾 生成對帳單</button>
       </div>
       <div id="reconSyncStatus" style="font-size:11px;color:var(--muted);margin-bottom:8px">☁️ Firebase 同步中…</div>
       <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="hidden">
@@ -357,6 +358,30 @@ tbody td{padding:8px 11px;vertical-align:top}
       <div style="margin-top:12px;display:flex;gap:8px" id="merchantReconActions" class="hidden">
         <button class="btn btn-primary" onclick="submitMerchantRecon()">送出對帳結果</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 資料庫查詢（已封存的對帳單） -->
+  <div class="page" id="page-archive">
+    <div class="card">
+      <div class="card-title">📚 資料庫查詢 — 歷史對帳單</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+        已從「對帳作業」封存的對帳單永久儲存於此。查詢條件：商家、年份、狀態。
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <select class="select-in" id="archMerchant" style="min-width:160px"><option value="">（所有商家）</option></select>
+        <select class="select-in" id="archYear" style="width:110px"><option value="">（所有年份）</option></select>
+        <select class="select-in" id="archStatus" style="width:140px">
+          <option value="">全部狀態</option>
+          <option value="好糰對帳中">好糰對帳中</option>
+          <option value="店家對帳中">店家對帳中</option>
+          <option value="店家對帳完成">店家對帳完成</option>
+          <option value="發票已開立">發票已開立</option>
+        </select>
+        <input class="inp" id="archKeyword" placeholder="訂單 ID / 訂購人（關鍵字）" style="width:200px">
+        <button class="btn btn-primary btn-sm" onclick="searchArchive()">🔍 查詢</button>
+      </div>
+      <div id="archList"></div>
     </div>
   </div>
 
@@ -721,6 +746,7 @@ function switchTab(id){
   if(id==='orders'){closeOrderDetail();showAllBatches()}
   if(id==='import'){refreshMerchantSelect()}
   if(id==='recon'){initReconPage()}
+  if(id==='archive'){initArchivePage()}
 }
 function notify(msg,err=false){const n=el('notif');n.textContent=msg;n.className='notif'+(err?' err':'');clearTimeout(n._t);setTimeout(()=>n.classList.add('show'),10);n._t=setTimeout(()=>n.classList.remove('show'),3200)}
 function showProg(t){el('prog-text').textContent=t;el('prog').style.display='block'}
@@ -1961,12 +1987,12 @@ function reconSetHalfMonth(half){
   if(half===1){
     el('reconDateFrom').value=`${y}-${p(m)}-01`;
     el('reconDateTo').value=`${y}-${p(m)}-15`;
-    notify(`已填入 ${y}/${m} 上半月，請按「搜尋區間訂單」`);
+    notify(`已填入 ${y}/${m} 上半月，請按「🧾 生成對帳單」`);
   }else{
     const lastDay=new Date(y,m,0).getDate();
     el('reconDateFrom').value=`${y}-${p(m)}-16`;
     el('reconDateTo').value=`${y}-${p(m)}-${p(lastDay)}`;
-    notify(`已填入 ${y}/${m} 下半月（16-${lastDay}），請按「搜尋區間訂單」`);
+    notify(`已填入 ${y}/${m} 下半月（16-${lastDay}），請按「🧾 生成對帳單」`);
   }
 }
 function reconClearDateRange(){
@@ -1974,28 +2000,177 @@ function reconClearDateRange(){
   el('reconRangeCard').classList.add('hidden');
   if(typeof G!=='undefined')G._reconRange=null;
 }
-function searchReconRange(){
+// ═══ 歷史紀錄 / 資料庫查詢 操作 ═══
+function archiveRecon(key){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以封存',true);return}
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
+  if(!confirm(`確定把此對帳單封存到「📚 資料庫查詢」？\n\n封存後：\n・從「對帳作業」歷史紀錄區消失\n・可在「資料庫查詢」永久查詢\n・可隨時取消封存回到工作區`))return;
+  rec.archivedAt=new Date().toLocaleString('zh-TW');
+  rec.archivedBy=CUR?.nickname||CUR?.phone||'';
+  DB.set('recons',recons);
+  notify(`📦 已封存到資料庫`);
+  searchRecon();
+}
+function unarchiveRecon(key){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以取消封存',true);return}
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
+  if(!confirm(`確定把此對帳單從資料庫拿回「對帳作業」工作區？`))return;
+  delete rec.archivedAt;delete rec.archivedBy;
+  DB.set('recons',recons);
+  notify(`↩️ 已取消封存`);searchArchive();
+}
+function delRecon(key){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以刪除',true);return}
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
+  const isArchived=!!rec.archivedAt;
+  const msg=isArchived?`⚠️ 此對帳單已封存於資料庫。\n永久刪除後無法復原！\n\n確定要刪除嗎？`:`確定刪除此對帳單？\n此動作無法復原（建議改用「封存」保留紀錄）`;
+  if(!confirm(msg))return;
+  delete recons[key];DB.set('recons',recons);
+  notify('已刪除');
+  if(isArchived)searchArchive();else searchRecon();
+}
+// 下載單筆對帳單 Excel（從 recons[key] 讀取，不用 UI 區間）
+function downloadReconExcel(key){
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec){notify('找不到對帳單',true);return}
+  const parsed=parseReconKey(key)||{};
+  const mt=rec.merchant||parsed.merchant||'未知商家';
+  const df=rec.df||parsed.df||'',dt=rec.dt||parsed.dt||'';
+  const rangeLabel=(df===dt)?df:`${df}_至_${dt}`;
+  try{
+    const header=['取件日期','星期','訂單ID','主聯絡人','外送地址','商品總金額','好糰折扣','服務費計算基礎','服務費','應收','對帳結果 預設正確'];
+    const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+    const rows=[header];
+    const orders=rec.orders||[];
+    orders.forEach(o=>{
+      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
+      rows.push([o.pickTime||'',wk,o.oid,o.buyer,o.addr||'',o.amount,o.discount||0,o.base||o.amount,o.fee||0,o.recv||0,o.result||'']);
+    });
+    if(!orders.length){notify('此對帳單無訂單資料',true);return}
+    const sumRow=['','','合計','','',0,0,0,0,0,''];
+    for(let i=1;i<rows.length;i++){sumRow[5]+=rows[i][5]||0;sumRow[6]+=rows[i][6]||0;sumRow[7]+=rows[i][7]||0;sumRow[8]+=rows[i][8]||0;sumRow[9]+=rows[i][9]||0}
+    rows.push(sumRow);
+    const discAmt=rec.discountAmt||0;
+    rows.push([]);rows.push([]);
+    rows.push(['調帳原因',rec.discountReason||'']);
+    rows.push(['調帳金額',discAmt]);
+    rows.push([]);rows.push([]);
+    rows.push(['訂單金額小計',sumRow[7]]);
+    rows.push(['好糰折扣小計',sumRow[6]]);
+    rows.push(['調帳金額小計',discAmt]);
+    rows.push(['合計',sumRow[7]+discAmt]);
+    rows.push([]);
+    rows.push(['本期服務費',sumRow[8]]);
+    rows.push(['應收合計',sumRow[7]-sumRow[8]+discAmt]);
+    rows.push([]);
+    rows.push(['匯款日期',rec.payDate||'']);
+    rows.push(['匯款金額',rec.payAmt||Math.round(sumRow[7]-sumRow[8]+discAmt)]);
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'對帳單');
+    XLSX.writeFile(wb,`對帳單_${mt}_${rangeLabel}.xlsx`);
+    notify(`✅ 已下載：${mt} · ${rangeLabel}`);
+  }catch(e){notify('下載失敗：'+e.message,true);console.error(e)}
+}
+// ═══ 資料庫查詢（已封存對帳單）═══
+function initArchivePage(){
+  // 初始化商家下拉
+  const ms=el('archMerchant');if(ms){
+    const list=getMerchants();
+    if(CUR?.role==='merchant'){
+      ms.innerHTML=`<option value="${CUR.businessName}">${CUR.businessName}</option>`;ms.disabled=true;
+    }else{
+      ms.innerHTML='<option value="">（所有商家）</option>'+list.map(n=>`<option value="${n}">${n}</option>`).join('');ms.disabled=false;
+    }
+  }
+  // 初始化年份（掃描所有封存資料找出有紀錄的年份）
+  const yr=el('archYear');if(yr){
+    const recons=DB.get('recons',{});
+    const years=new Set();
+    for(const[k,r] of Object.entries(recons)){
+      if(!r?.archivedAt)continue;
+      const p=parseReconKey(k);if(p?.year)years.add(p.year);
+    }
+    const sorted=[...years].sort((a,b)=>b-a);
+    yr.innerHTML='<option value="">（所有年份）</option>'+sorted.map(y=>`<option value="${y}">${y}</option>`).join('');
+  }
+  searchArchive();
+}
+function searchArchive(){
+  const merchant=el('archMerchant')?.value||'',year=el('archYear')?.value||'',status=el('archStatus')?.value||'',kw=(el('archKeyword')?.value||'').trim().toLowerCase();
+  const recons=DB.get('recons',{});
+  let entries=Object.entries(recons).map(([key,rec])=>{
+    const parsed=parseReconKey(key);
+    return(parsed&&rec?.archivedAt)?{key,rec,...parsed}:null;
+  }).filter(Boolean);
+  // 商家角色：只看自己的
+  if(CUR?.role==='merchant')entries=entries.filter(e=>e.merchant===CUR.businessName);
+  if(merchant)entries=entries.filter(e=>e.merchant===merchant);
+  if(year)entries=entries.filter(e=>String(e.year)===String(year));
+  if(status)entries=entries.filter(e=>(e.rec?.status||'好糰對帳中')===status);
+  if(kw){
+    entries=entries.filter(e=>{
+      return(e.rec?.orders||[]).some(o=>(o.oid||'').toLowerCase().includes(kw)||(o.buyer||'').toLowerCase().includes(kw));
+    });
+  }
+  entries.sort((a,b)=>(b.rec?.archivedAt||'').localeCompare(a.rec?.archivedAt||'')||(b.df||'').localeCompare(a.df||''));
+  const SC={'好糰對帳中':'#999','店家對帳中':'#e67e22','店家對帳完成':'#27ae60','發票已開立':'#2980b9'};
+  if(!entries.length){el('archList').innerHTML='<div class="empty-state"><div class="empty-icon">📂</div><div style="color:var(--muted)">資料庫中尚無符合條件的歷史對帳單</div></div>';return}
+  let html=`<div style="font-size:12px;color:var(--muted);margin-bottom:8px">共 ${entries.length} 筆</div>`;
+  for(const e of entries){
+    const{key,rec,label,merchant:m}=e;
+    const status=rec?.status||'好糰對帳中';
+    const total=rec?.orders?.reduce((s,o)=>s+(o.amount||0),0)||0;
+    const escKey=key.replace(/'/g,"\\'");
+    const archTag=`<span class="hi-tag" style="background:#e8e3d8;color:var(--crust);font-size:10px" title="封存時間">📦 ${rec.archivedAt?.slice(0,16)}${rec.archivedBy?' by '+rec.archivedBy:''}</span>`;
+    html+=`<div class="history-item"><div class="hi-icon">📚</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${label}</span></div><div class="hi-meta">${rec.orders.length} 筆 · $${total.toLocaleString()}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${archTag}</div></div><div class="hi-actions" style="flex-wrap:wrap">`;
+    html+=`<button class="btn btn-blue btn-sm" onclick="viewReconDetail('${escKey}')">查看明細</button>`;
+    html+=`<button class="btn btn-ghost btn-sm" onclick="downloadReconExcel('${escKey}')">⬇️ 下載</button>`;
+    if(isAdmin(CUR?.role)){
+      html+=`<button class="btn btn-ghost btn-sm" onclick="unarchiveRecon('${escKey}')" title="拿回對帳作業工作區">↩️ 取消封存</button>`;
+      html+=`<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="delRecon('${escKey}')" title="永久刪除">✕</button>`;
+    }
+    html+=`</div></div>`;
+  }
+  el('archList').innerHTML=html;
+}
+// 生成對帳單：把區間內訂單融合成一筆 recon 寫入 recons（歷史紀錄區）
+function generateRecon(){
   const merchant=el('reconMerchant').value;
   const df=el('reconDateFrom').value,dt=el('reconDateTo').value;
   if(!merchant){notify('請先選擇商家',true);return}
   if(!df&&!dt){notify('請選擇日期（單日請填相同日期，或用上半月/下半月快捷鈕）',true);return}
-  const dfUse=df||dt,dtUse=dt||df;// 允許單日（from=to）
+  const dfUse=df||dt,dtUse=dt||df;
   if(dfUse>dtUse){notify('起始日期不能晚於結束日期',true);return}
+  // 先預覽，確認有訂單才寫入
   const batches=DB.get('batches',{});
-  const byOid={};
+  let cnt=0,amt=0;
   for(const b of Object.values(batches)){
     if(b.merchant!==merchant)continue;
+    const oids=new Set();
     for(const item of (b.items||[])){
       const d=normDate(item.pickTime);if(!d)continue;
       if(d<dfUse||d>dtUse)continue;
-      if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0,qty:0,items:0};
-      byOid[item.oid].amount+=item.subtotal||0;
-      byOid[item.oid].qty+=item.qty||0;
-      byOid[item.oid].items+=1;
+      oids.add(item.oid);amt+=item.subtotal||0;
     }
+    cnt+=oids.size;
   }
-  const orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
-  renderReconRange(orders,merchant,dfUse,dtUse);
+  if(!cnt){notify('此區間無訂單，無法生成對帳單',true);return}
+  // 檢查是否已存在同區間對帳單
+  const key=getReconRangeKey(dfUse,dtUse,merchant);
+  const recons=DB.get('recons',{});
+  if(recons[key]){
+    if(recons[key].archivedAt){notify(`此區間對帳單已存在於「📚 資料庫查詢」（已封存），請先取消封存再重新生成`,true);return}
+    if(!confirm(`已有相同區間對帳單（${merchant} · ${dfUse===dtUse?dfUse:`${dfUse} ~ ${dtUse}`}）\n\n覆蓋生成？（保留調帳/匯款設定；訂單清單用最新 batches 重產）`))return;
+  }
+  const rec=regenerateReconFromBatches(dfUse,dtUse,merchant,true);
+  const total=rec.orders.reduce((s,o)=>s+(o.amount||0),0);
+  notify(`✅ 已生成對帳單：${merchant} · ${dfUse===dtUse?dfUse:`${dfUse} ~ ${dtUse}`} · ${rec.orders.length} 筆 · $${total.toLocaleString()}`);
+  el('reconRangeCard').classList.add('hidden');
+  searchRecon();
+  // 捲動到歷史紀錄區並高亮新生成的這筆
+  setTimeout(()=>{
+    const row=document.querySelector(`[data-reconkey="${CSS.escape(key)}"]`);
+    if(row){row.scrollIntoView({behavior:'smooth',block:'center'});row.style.animation='flashHi 1.5s ease-out';}
+  },100);
 }
 function renderReconRange(orders,merchant,df,dt){
   const card=el('reconRangeCard');
@@ -2201,11 +2376,11 @@ function rebuildReconFromBatches(){
 function searchRecon(){
   const merchant=el('reconMerchant').value,statusF=el('reconStatus').value;
   const recons=DB.get('recons',{});
-  // 列出所有對帳紀錄，依 merchant / status 篩選，按 年月 降冪
+  // 列出未封存的對帳紀錄（已封存的在「📚 資料庫查詢」顯示）
   let entries=Object.entries(recons).map(([key,rec])=>{
     const parsed=parseReconKey(key);
     return parsed?{key,rec,...parsed}:null;
-  }).filter(Boolean);
+  }).filter(Boolean).filter(e=>!e.rec?.archivedAt);
   if(merchant)entries=entries.filter(e=>e.merchant===merchant);
   if(statusF)entries=entries.filter(e=>(e.rec?.status||'好糰對帳中')===statusF);
   // 按起始日期降冪（新的在前），同日期則依商家名排序
@@ -2219,13 +2394,20 @@ function searchRecon(){
     const discAmt=rec?.discountAmt||0;
     const rebuilt=rec?.rebuiltAt?`<span class="hi-tag" style="background:#f0e6d2;color:var(--crust);font-size:10px">🔄 ${rec.rebuiltAt.slice(5,16)}</span>`:'';
     const discTag=discAmt?`<span class="hi-tag" style="background:#fdf4e3;color:var(--bread);font-size:10px">調帳 ${discAmt>0?'+':''}$${discAmt.toLocaleString()}</span>`:'';
-    html+=`<div class="history-item"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${label}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions">`;
+    html+=`<div class="history-item" data-reconkey="${key}"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${label}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions" style="flex-wrap:wrap">`;
+    const escKey=key.replace(/'/g,"\\'");
     if(CUR?.role==='merchant'){
-      if(status==='店家對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="openMerchantRecon('${key}')">開始對帳</button>`;
-      if(rec&&(status==='店家對帳完成'||status==='發票已開立'))html+=`<button class="btn btn-blue btn-sm" onclick="viewMerchantReconDetail('${key}')">📋 查詢明細</button>`;
-    }else if(isAdmin(CUR?.role)){
-      if(rec){html+=`<button class="btn btn-blue btn-sm" onclick="viewReconDetail('${key}')">查看明細</button>`}
-      if(status==='店家對帳完成'){html+=`<button class="btn btn-green btn-sm" onclick="markInvoiced('${key}')">標記發票已開立</button>`}
+      if(status==='店家對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="openMerchantRecon('${escKey}')">開始對帳</button>`;
+      if(rec&&(status==='店家對帳完成'||status==='發票已開立'))html+=`<button class="btn btn-blue btn-sm" onclick="viewMerchantReconDetail('${escKey}')">📋 查詢明細</button>`;
+      if(rec)html+=`<button class="btn btn-ghost btn-sm" onclick="downloadReconExcel('${escKey}')" title="下載 Excel">⬇️ 下載</button>`;
+    }else if(isAdmin(CUR?.role)||CUR?.role==='cs'){
+      if(rec)html+=`<button class="btn btn-blue btn-sm" onclick="viewReconDetail('${escKey}')">查看明細</button>`;
+      if(rec)html+=`<button class="btn btn-ghost btn-sm" onclick="downloadReconExcel('${escKey}')" title="下載 Excel">⬇️ 下載</button>`;
+      if(rec&&isAdmin(CUR?.role)){
+        if(status==='店家對帳完成')html+=`<button class="btn btn-green btn-sm" onclick="markInvoiced('${escKey}')">標記發票已開立</button>`;
+        html+=`<button class="btn btn-ghost btn-sm" onclick="archiveRecon('${escKey}')" title="封存到資料庫永久保存">📦 封存</button>`;
+        html+=`<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="delRecon('${escKey}')" title="刪除">✕</button>`;
+      }
     }
     html+=`</div></div>`;
   }
@@ -2234,13 +2416,8 @@ function searchRecon(){
     html=`<div class="empty-state"><div class="empty-icon">💰</div><div style="max-width:420px;margin:0 auto;line-height:1.6;color:var(--muted)">${hint}</div></div>`;
   }
   el('reconList').innerHTML=html;
-  // 🔗 若有設日期區間，自動連帶執行「搜尋區間訂單」，避免 Ken 要另外按一個按鈕
-  const _df=el('reconDateFrom')?.value||'',_dt=el('reconDateTo')?.value||'';
-  if((_df||_dt)&&merchant){
-    searchReconRange();
-  }else{
-    el('reconRangeCard').classList.add('hidden');
-  }
+  // 區間結果卡已不使用（改為明確「生成對帳單」流程）
+  el('reconRangeCard').classList.add('hidden');
   // 控制匯出按鈕列（由目前 UI 區間決定 key）
   if(merchant&&isAdmin(CUR?.role)){
     el('reconActions').classList.remove('hidden');
