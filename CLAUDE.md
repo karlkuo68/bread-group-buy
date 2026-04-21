@@ -185,7 +185,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
-（下個 commit）fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
+eba0d08 fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
 72e785d feat(users): 帳號管理擴充（上限 3 / 篩選 / 改暱稱改密碼 / 鎖定解鎖 / 刪除 confirm）（2026-04-21）
 36fd6de cleanup+fix: 刪除無用設定（storeName、ipp）+ 對帳搜尋連動日期區間（2026-04-21）
 6b4f4c2 refactor(recon): 移除年/月下拉，改從日期區間推算；對帳清單列出全部（2026-04-21）
