@@ -362,11 +362,9 @@ tbody td{padding:8px 11px;vertical-align:top}
   <div class="page" id="page-settings">
     <div class="card">
       <div class="card-title">🏷️ 貼紙設定</div>
-      <div class="set-row"><div class="set-info"><div class="set-label">貼紙店名</div><div class="set-desc">顯示在貼紙頂部</div></div><div class="set-ctrl"><input class="store-name-inp" id="storeName" value="好櫃 RT麵包店"></div></div>
       <div class="set-row"><div class="set-info"><div class="set-label">貼紙 QR Code</div><div class="set-desc">顯示在貼紙右上角</div></div>
         <div class="set-ctrl" style="flex-direction:column;align-items:flex-start;gap:8px"><div class="qr-preview-box"><div id="qrPreview"><div class="qr-placeholder">尚未上傳</div></div><div><button class="btn btn-primary btn-sm" onclick="el('qrUpload').click()">上傳 QR Code</button><input type="file" id="qrUpload" accept="image/*" class="hidden" onchange="handleQR(this)"><br><button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="clearQR()">清除</button></div></div></div>
       </div>
-      <div class="set-row"><div class="set-info"><div class="set-label">每張貼紙最多品項數</div><div class="set-desc">超過自動分張</div></div><div class="set-ctrl"><button class="adj" onclick="adjS('ipp',-1)">−</button><input class="num-in" id="ipp" type="number" min="3" max="15" value="6"><button class="adj" onclick="adjS('ipp',1)">＋</button></div></div>
       <div class="btn-row"><button class="btn btn-primary" onclick="saveSettings()">💾 儲存貼紙設定</button></div>
     </div>
     <div class="card">
@@ -572,20 +570,17 @@ function renderUsers(){
 }
 
 // ═══ SETTINGS ═══
-const G={items:[],searchItems:[],viewItems:[],stickers:[],rules:[],bagCap:8,ipp:6,storeName:'好櫃 RT麵包店',qrBase64:'',currentMerchant:''};
+const G={items:[],searchItems:[],viewItems:[],stickers:[],rules:[],bagCap:8,qrBase64:'',currentMerchant:''};
 function loadSettings(){
   const s=DB.get('settings',{});
   if(s.bagCap){G.bagCap=s.bagCap;el('bagCap').value=G.bagCap}
-  if(s.ipp){G.ipp=s.ipp;el('ipp').value=G.ipp}
   if(s.rules)G.rules=s.rules;
-  if(s.storeName){G.storeName=s.storeName;el('storeName').value=G.storeName}
   if(s.qrBase64)G.qrBase64=s.qrBase64;
   renderRules();loadQR();renderMerchants();
 }
 function saveSettings(){
-  G.storeName=el('storeName').value.trim()||'好櫃 RT麵包店';
-  G.bagCap=+el('bagCap').value||8;G.ipp=+el('ipp').value||6;
-  DB.set('settings',{bagCap:G.bagCap,ipp:G.ipp,rules:G.rules,storeName:G.storeName,qrBase64:G.qrBase64});
+  G.bagCap=+el('bagCap').value||8;
+  DB.set('settings',{bagCap:G.bagCap,rules:G.rules,qrBase64:G.qrBase64});
   notify('✅ 設定已儲存');
 }
 function adjS(id,d){const e=el(id);e.value=Math.max(+e.min||1,Math.min(+e.max||50,+e.value+d))}
@@ -1676,13 +1671,14 @@ function regenerateReconFromBatches(year,month,merchant,preserveMeta){
   // 重算時：調帳歸零（訂單變動後調帳需重新評估，Ken 要求）；匯款/狀態保留
   const newRec=preserveMeta?{
     ...old,orders,
+    year,month,merchant,
     status:old.status||'好糰對帳中',
     discountReason:'',
     discountAmt:0,
     payDate:old.payDate||'',
     payAmt:old.payAmt||0,
     rebuiltAt:new Date().toLocaleString('zh-TW')
-  }:{orders,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
+  }:{orders,year,month,merchant,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
   recons[key]=newRec;
   DB.set('recons',recons);
   console.log('[regenerateRecon]',key,'orders=',orders.length,'preserveMeta=',preserveMeta);
@@ -1738,6 +1734,13 @@ function searchRecon(){
     html=`<div class="empty-state"><div class="empty-icon">💰</div><div style="max-width:420px;margin:0 auto;line-height:1.6;color:var(--muted)">${hint}</div></div>`;
   }
   el('reconList').innerHTML=html;
+  // 🔗 若有設日期區間，自動連帶執行「搜尋區間訂單」，避免 Ken 要另外按一個按鈕
+  const _df=el('reconDateFrom')?.value||'',_dt=el('reconDateTo')?.value||'';
+  if((_df||_dt)&&merchant){
+    searchReconRange();
+  }else{
+    el('reconRangeCard').classList.add('hidden');
+  }
   // 控制匯出按鈕列
   if(merchant&&isAdmin(CUR?.role)){
     el('reconActions').classList.remove('hidden');
@@ -1933,7 +1936,10 @@ function markInvoiced(key){
 }
 function viewReconDetail(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
-  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px">${rec.year}年${rec.month}月 · ${rec.merchant} · 狀態：${rec.status}</div>`;
+  // 相容：舊資料/重算產生的 rec 可能沒存 year/month/merchant，從 key 推回
+  const parsed=parseReconKey(key)||{};
+  const yy=rec.year||parsed.year||'—',mm=rec.month||parsed.month||'—',mt=rec.merchant||parsed.merchant||'—';
+  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px">${yy}年${mm}月 · ${mt} · 狀態：${rec.status||'好糰對帳中'}</div>`;
   html+=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th style="text-align:right">金額</th><th style="text-align:right">折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
   let tAmt=0,tDiscount=0,tFee=0,tRecv=0;
   rec.orders.forEach(o=>{
@@ -1965,7 +1971,9 @@ function viewReconDetail(key){
 function viewMerchantReconDetail(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
   el('merchantReconCard').classList.remove('hidden');
-  el('merchantReconInfo').textContent=`${rec.year}年${rec.month}月 · ${rec.merchant} · 共 ${rec.orders.length} 筆 · 狀態：${rec.status}`;
+  const parsed=parseReconKey(key)||{};
+  const yy=rec.year||parsed.year||'—',mm=rec.month||parsed.month||'—',mt=rec.merchant||parsed.merchant||'—';
+  el('merchantReconInfo').textContent=`${yy}年${mm}月 · ${mt} · 共 ${rec.orders.length} 筆 · 狀態：${rec.status||'好糰對帳中'}`;
   let tRecv=0,tFee=0,tAmt=0,tDiscount=0;
   let html=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th>地址</th><th style="text-align:right">金額</th><th style="text-align:right">好糰折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
   rec.orders.forEach(o=>{
