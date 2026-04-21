@@ -2570,31 +2570,91 @@ function viewReconDetail(key){
       ${sendBtn}
     </span>
   </div>`;
-  html+=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th style="text-align:right">金額</th><th style="text-align:right">折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
-  let tAmt=0,tDiscount=0,tFee=0,tRecv=0;
+  // 訂單明細表（欄位與下載 Excel 一致：取件日期、星期、訂單ID、主聯絡人、外送地址、商品總金額、好糰折扣、服務費計算基礎、服務費、應收、對帳結果）
+  const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+  html+=`<div class="tbl-wrap" style="margin-bottom:12px"><table style="width:100%;font-size:11px;border-collapse:collapse">
+    <thead><tr style="background:#f5f0e8;font-weight:700">
+      <th style="padding:5px 4px;text-align:left;width:90px">取件日期</th>
+      <th style="padding:5px 4px;width:36px">週</th>
+      <th style="padding:5px 4px;text-align:left">訂單ID</th>
+      <th style="padding:5px 4px;text-align:left">主聯絡人</th>
+      <th style="padding:5px 4px;text-align:left">外送地址</th>
+      <th style="padding:5px 4px;text-align:right;width:78px">商品總金額</th>
+      <th style="padding:5px 4px;text-align:right;width:72px">好糰折扣</th>
+      <th style="padding:5px 4px;text-align:right;width:78px">服務費計算基礎</th>
+      <th style="padding:5px 4px;text-align:right;width:64px">服務費</th>
+      <th style="padding:5px 4px;text-align:right;width:72px">應收</th>
+      <th style="padding:5px 4px;text-align:center;width:60px">對帳結果</th>
+    </tr></thead><tbody>`;
+  let tAmt=0,tDiscount=0,tBase=0,tFee=0,tRecv=0;
   rec.orders.forEach(o=>{
-    tAmt+=o.amount;tDiscount+=o.discount||0;tFee+=o.fee||0;tRecv+=o.recv||0;
+    tAmt+=o.amount||0;tDiscount+=o.discount||0;tBase+=(o.base||o.amount||0);tFee+=o.fee||0;tRecv+=o.recv||0;
     const rc=o.result==='錯誤'?'color:#c55;font-weight:700':'';
-    html+=`<tr style="border-bottom:1px solid #eee"><td style="padding:3px">${o.pickTime||''}</td><td>${o.oid}</td><td>${o.buyer}</td><td style="text-align:right">$${o.amount.toLocaleString()}</td><td style="text-align:right">${o.discount?'$'+o.discount.toLocaleString():''}</td><td style="text-align:right">$${(o.fee||0).toLocaleString()}</td><td style="text-align:right">$${(o.recv||0).toLocaleString()}</td><td style="${rc}">${o.result||'正確'}</td></tr>`;
+    const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
+    const d=normDate(o.pickTime)||o.pickTime||'';
+    html+=`<tr style="border-bottom:1px solid #eee">
+      <td style="padding:4px;font-family:'DM Mono',monospace">${d}</td>
+      <td style="padding:4px;text-align:center">${wk}</td>
+      <td style="padding:4px;font-family:'DM Mono',monospace">${o.oid}</td>
+      <td style="padding:4px">${o.buyer||''}</td>
+      <td style="padding:4px;font-size:10.5px">${o.addr||''}</td>
+      <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace">$${(o.amount||0).toLocaleString()}</td>
+      <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace;color:#e67e22">${o.discount?'$'+o.discount.toLocaleString():''}</td>
+      <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace">$${(o.base||o.amount||0).toLocaleString()}</td>
+      <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace">$${(o.fee||0).toLocaleString()}</td>
+      <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace;font-weight:600">$${(o.recv||0).toLocaleString()}</td>
+      <td style="padding:4px;text-align:center;${rc}">${o.result||'正確'}</td>
+    </tr>`;
   });
-  // 合計列（含折扣合計）
-  html+=`<tr style="font-weight:700;border-top:2px solid #333;background:#f9f6f0"><td colspan="3">合計</td><td style="text-align:right">$${tAmt.toLocaleString()}</td><td style="text-align:right;color:#e67e22">${tDiscount?'$'+tDiscount.toLocaleString():''}</td><td style="text-align:right">$${tFee.toLocaleString()}</td><td style="text-align:right">$${tRecv.toLocaleString()}</td><td></td></tr>`;
-  // 調帳原因 + 調帳金額列
-  if(rec.discountReason||rec.discountAmt){
-    html+=`<tr style="background:#fff8f0"><td colspan="3" style="padding:4px 3px;color:#888;font-style:italic">調帳原因</td><td colspan="3" style="padding:4px 3px;color:#333">${rec.discountReason||'—'}</td><td style="text-align:right;font-weight:700;color:#c55;padding:4px 3px">$${(rec.discountAmt||0).toLocaleString()}</td><td style="padding:4px 3px;font-size:10px;color:#888">調帳金額</td></tr>`;
-  }
-  html+=`</table>`;
-  // 匯款資訊
-  if(rec.payDate||rec.payAmt){
-    const pd=fmtPayDate(rec.payDate)||rec.payDate||'';
-    const payable=tRecv+(rec.discountAmt||0);
-    const diff=payable-(rec.payAmt||0);
-    const diffStyle=diff!==0?'color:#c55;font-weight:700':'color:#27ae60;font-weight:700';
-    html+=`<div style="margin-top:8px;padding:8px;background:#f0f8ff;border-radius:4px;font-size:11px;line-height:2">`;
-    html+=`<div>匯款日期：<strong>${pd||'—'}</strong> &nbsp;·&nbsp; 匯款金額：<strong>$${(rec.payAmt||0).toLocaleString()}</strong></div>`;
-    html+=`<div>應收：$${tRecv.toLocaleString()} &nbsp;＋&nbsp; 調帳：${rec.discountAmt>=0?'+':''}$${(rec.discountAmt||0).toLocaleString()} &nbsp;＝&nbsp; 應匯：$${payable.toLocaleString()} &nbsp;｜&nbsp; 差額：<span style="${diffStyle}">${diff>=0?'+':''}$${diff.toLocaleString()}</span></div>`;
-    html+=`</div>`;
-  }
+  html+=`<tr style="font-weight:700;border-top:2px solid #333;background:#f9f6f0">
+      <td colspan="5" style="padding:5px 4px">合計（${rec.orders.length} 筆）</td>
+      <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tAmt.toLocaleString()}</td>
+      <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace;color:#e67e22">${tDiscount?'$'+tDiscount.toLocaleString():''}</td>
+      <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tBase.toLocaleString()}</td>
+      <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tFee.toLocaleString()}</td>
+      <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tRecv.toLocaleString()}</td>
+      <td></td>
+    </tr></tbody></table></div>`;
+  // 調帳與匯款小計區（兩欄網格）— 跟 Excel 底部資訊一致
+  const discAmt=rec.discountAmt||0;
+  const totalPlusAdj=tAmt+discAmt;
+  const recvPlusAdj=tRecv+discAmt;
+  const pd=fmtPayDate(rec.payDate)||rec.payDate||'';
+  const payAmt=rec.payAmt||0;
+  const diff=recvPlusAdj-payAmt;
+  const diffStyle=diff!==0?'color:#c55;font-weight:700':'color:#27ae60;font-weight:700';
+  html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+    <div style="padding:10px 14px;background:#fff8f0;border:1px solid #f0e0c8;border-radius:6px;font-size:12px;line-height:1.9">
+      <div style="font-weight:700;color:var(--crust);margin-bottom:4px">💰 調帳資訊</div>
+      <div>調帳原因：<strong>${rec.discountReason||'—'}</strong></div>
+      <div>調帳金額：<strong style="color:${discAmt<0?'#c55':'#27ae60'};font-family:'DM Mono',monospace">${discAmt>0?'+':''}$${discAmt.toLocaleString()}</strong></div>
+    </div>
+    <div style="padding:10px 14px;background:#f0f8ff;border:1px solid #d8e4f0;border-radius:6px;font-size:12px;line-height:1.9">
+      <div style="font-weight:700;color:var(--crust);margin-bottom:4px">🏦 匯款資訊</div>
+      <div>匯款日期：<strong>${pd||'—'}</strong></div>
+      <div>匯款金額：<strong style="font-family:'DM Mono',monospace">$${payAmt.toLocaleString()}</strong></div>
+    </div>
+  </div>`;
+  // 金額小計區塊（跟 Excel 底部一致）
+  html+=`<div style="padding:12px 16px;background:#f9f6f0;border:1.5px solid var(--warm);border-radius:8px;font-size:13px;line-height:2">
+    <div style="font-weight:700;color:var(--crust);margin-bottom:6px;font-size:14px">📊 金額小計</div>
+    <div style="display:grid;grid-template-columns:auto auto;gap:2px 24px;font-family:'DM Mono',monospace">
+      <span style="color:var(--muted)">訂單金額小計</span><span style="text-align:right">$${tBase.toLocaleString()}</span>
+      <span style="color:var(--muted)">好糰折扣小計</span><span style="text-align:right;color:#e67e22">$${tDiscount.toLocaleString()}</span>
+      <span style="color:var(--muted)">調帳金額小計</span><span style="text-align:right;color:${discAmt<0?'#c55':'#27ae60'}">${discAmt>0?'+':''}$${discAmt.toLocaleString()}</span>
+      <span style="color:var(--muted);border-top:1px solid var(--warm);padding-top:4px">合計</span><span style="text-align:right;border-top:1px solid var(--warm);padding-top:4px;font-weight:700">$${totalPlusAdj.toLocaleString()}</span>
+      <span style="color:var(--muted)">本期服務費</span><span style="text-align:right">$${tFee.toLocaleString()}</span>
+      <span style="color:var(--crust);font-weight:700;border-top:2px solid var(--bread);padding-top:4px">應收合計</span><span style="text-align:right;color:var(--bread);font-weight:700;font-size:15px;border-top:2px solid var(--bread);padding-top:4px">$${recvPlusAdj.toLocaleString()}</span>
+    </div>
+    ${(pd||payAmt)?`<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--warm);font-family:'DM Mono',monospace">應匯：$${recvPlusAdj.toLocaleString()} ＝ 應收 $${tRecv.toLocaleString()} ＋ 調帳 ${discAmt>=0?'+':''}$${discAmt.toLocaleString()} &nbsp;｜&nbsp; 實匯 $${payAmt.toLocaleString()} &nbsp;｜&nbsp; 差額 <span style="${diffStyle}">${diff>=0?'+':''}$${diff.toLocaleString()}</span></div>`:''}
+  </div>`;
+  // 元資訊 footer
+  const meta=[];
+  if(rec.sentAt)meta.push(`送出：${rec.sentAt}${rec.sentBy?' by '+rec.sentBy:''}`);
+  if(rec.rebuiltAt)meta.push(`重算：${rec.rebuiltAt}`);
+  if(rec.updatedAt)meta.push(`匯入/更新：${rec.updatedAt}${rec.updatedBy?' by '+rec.updatedBy:''}`);
+  if(rec.archivedAt)meta.push(`封存：${rec.archivedAt}${rec.archivedBy?' by '+rec.archivedBy:''}`);
+  if(meta.length)html+=`<div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.8">${meta.map(m=>'・ '+m).join('<br>')}</div>`;
   el('reconList').innerHTML=html;
 }
 // 商家端：查詢已完成對帳明細（店家對帳完成 / 發票已開立）
