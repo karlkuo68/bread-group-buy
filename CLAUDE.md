@@ -139,7 +139,7 @@ Firebase Realtime DB
 ## 最近 10 筆 commit
 
 ```
-（下個 commit）refactor(recon): 移除年/月下拉，改從日期區間推算；對帳清單列出全部（2026-04-21）
+6b4f4c2 refactor(recon): 移除年/月下拉，改從日期區間推算；對帳清單列出全部（2026-04-21）
 b3931b4 fix(recon): 匯出對帳單支援日期區間 + 重算時調帳歸零（2026-04-20）
 1a1aad6 fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
 97fb772 feat(recon): 對帳頁日期區間查詢 + 上半月/下半月快捷 + Firebase 同步狀態（2026-04-20）
