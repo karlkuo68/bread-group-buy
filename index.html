@@ -188,7 +188,7 @@ tbody td{padding:8px 11px;vertical-align:top}
 .detail-info{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px;margin-bottom:14px;padding:12px;background:var(--cream);border-radius:8px}
 .detail-label{color:var(--muted);font-weight:600;font-size:12px}
 .detail-val{color:var(--dark);font-weight:500}
-@media print{body *{visibility:hidden}#printArea,#printArea *{visibility:visible}#printArea{position:absolute;left:0;top:0;width:80mm}.stk{width:80mm!important;height:100mm!important;margin:0!important;box-shadow:none!important;page-break-after:always!important;border:1.5px solid #000!important}@page{size:80mm 100mm;margin:0}}
+@media print{body *{visibility:hidden}#printArea,#printArea *{visibility:visible}#printArea{position:absolute;left:0;top:0;width:80mm}.stk{width:80mm!important;height:100mm!important;margin:0!important;box-shadow:none!important;page-break-after:always!important;break-after:page!important;border:1.5px solid #000!important}#printArea .stk:last-child,.stk:last-child{page-break-after:auto!important;break-after:auto!important}@page{size:80mm 100mm;margin:0}}
 </style>
 </head>
 <body>
@@ -1514,6 +1514,7 @@ function dlPDF(items){
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 .stk{width:80mm;height:100mm;border:1.5px solid #333;border-radius:4px;overflow:hidden;background:#fff;font-family:'Noto Sans TC',sans-serif;page-break-after:always;page-break-inside:avoid;margin:0 auto 10px;display:flex;flex-direction:column;box-sizing:border-box}
+.stk:last-child{page-break-after:auto!important;break-after:auto!important}
 .stk-top{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:2px solid #333;flex-shrink:0}
 .stk-store{font-weight:800;font-size:28px;color:#333;letter-spacing:1px}
 .stk-qr{width:64px;height:64px;object-fit:contain}
@@ -1531,7 +1532,7 @@ body{font-family:'Noto Sans TC',sans-serif;background:#fff;padding:0;margin:0}
 .stk-tax{font-size:9.5px;color:#555;font-weight:600;margin-bottom:1px}
 .stk-note{font-size:10px;color:#c55;word-break:break-all}
 .pq{font-family:'DM Mono',monospace;font-size:0.9em;color:#555;white-space:nowrap;text-align:right}
-@media print{@page{size:80mm 100mm;margin:0}.stk{box-shadow:none!important;border-radius:0!important;border:none!important;margin:0!important;width:80mm!important;height:100mm!important;page-break-after:always}}
+@media print{@page{size:80mm 100mm;margin:0}.stk{box-shadow:none!important;border-radius:0!important;border:none!important;margin:0!important;width:80mm!important;height:100mm!important;page-break-after:always;break-after:page}.stk:last-child{page-break-after:auto!important;break-after:auto!important}}
 </style></head><body>${html}
 <script>
 window.onafterprint=function(){window.close()};
