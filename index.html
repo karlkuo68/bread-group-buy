@@ -335,9 +335,8 @@ tbody td{padding:8px 11px;vertical-align:top}
         <button class="btn btn-primary btn-sm" onclick="generateRecon()">🧾 生成對帳單</button>
         <button class="btn btn-blue btn-sm" onclick="searchRecon()">🔍 查詢</button>
       </div>
-      <!-- 第二排：匯出 / 匯入 / 重算（送出移到每筆對帳單與明細頁） -->
+      <!-- 第二排：匯入 / 重算（匯出已移到每筆對帳單的 ⬇️下載；送出移到每筆與明細頁） -->
       <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" class="hidden">
-        <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">⬇️ 匯出對帳單</button>
         <label class="btn btn-green btn-sm" id="btnReconImport">⬆️ 匯入對帳單<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
         <button class="btn btn-ghost btn-sm" id="btnReconRebuild" onclick="rebuildReconFromBatches()" title="用最新訂單批次重算對帳單（保留匯款/狀態；調帳歸零）">🔄 重算對帳單</button>
         <button class="btn btn-primary btn-sm hidden" id="btnReconInvoice" onclick="markInvoiced()">標記發票已開立</button>
@@ -2441,76 +2440,6 @@ function searchRecon(){
   }else if(!isAdmin(CUR?.role)){
     el('reconActions').classList.add('hidden');
   }
-}
-function exportReconExcel(){
-  const ctx=getCurrentReconKey();
-  if(!ctx){notify('請先選擇商家',true);return}
-  const{key,df,dt,merchant}=ctx;
-  const parsed=parseReconKey(key);const rangeLabel=parsed?.label||`${df} ~ ${dt}`;
-  let recons=DB.get('recons',{});
-  let existingRec=recons[key];
-  // 🛡️ 防呆：cache 若存在且與 batches 不一致 → 提示重算
-  if(existingRec?.orders?.length){
-    const stale=detectReconStale(existingRec.orders,merchant,df,dt);
-    if(stale.stale){
-      const fmt=(arr,max=3)=>arr.length?('（'+arr.slice(0,max).join('、')+(arr.length>max?' 等':'')+'）'):'';
-      const msg=`⚠️ 偵測到訂單資料已變動，此區間對帳單不是最新：\n\n`+
-        (stale.addedOids.length?`・新增 ${stale.addedOids.length} 筆${fmt(stale.addedOids)}\n`:'')+
-        (stale.removedOids.length?`・刪除 ${stale.removedOids.length} 筆${fmt(stale.removedOids)}\n`:'')+
-        (stale.changedOids.length?`・金額變動 ${stale.changedOids.length} 筆${fmt(stale.changedOids)}\n`:'')+
-        `\n要用最新訂單重算對帳單再匯出嗎？\n\n✅ 是 = 重算（保留匯款/狀態；調帳歸零）← 建議\n❌ 否 = 用舊資料匯出`;
-      if(confirm(msg)){
-        existingRec=regenerateReconFromBatches(df,dt,merchant,true);
-        recons=DB.get('recons',{});
-        notify('✅ 已依最新訂單重算（調帳已歸零），即將匯出');
-      }
-    }
-  }
-  // 沒 cache 就自動建立一筆（從 batches 首次產生，不動 metadata）
-  if(!existingRec?.orders?.length){
-    existingRec=regenerateReconFromBatches(df,dt,merchant,false);
-    recons=DB.get('recons',{});
-  }
-  const header=['取件日期','星期','訂單ID','主聯絡人','外送地址','商品總金額','好糰折扣','服務費計算基礎','服務費','應收','對帳結果 預設正確'];
-  const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
-  const rows=[header];
-  const orders=existingRec.orders||[];
-  orders.forEach(o=>{
-    const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
-    rows.push([o.pickTime||'',wk,o.oid,o.buyer,o.addr||'',o.amount,o.discount||0,o.base||o.amount,o.fee||0,o.recv||0,o.result||'']);
-  });
-  if(!orders.length){notify('此區間無訂單資料',true);return}
-  // 合計行
-  const sumRow=['','','合計','','',0,0,0,0,0,''];
-  for(let i=1;i<rows.length;i++){sumRow[5]+=rows[i][5]||0;sumRow[6]+=rows[i][6]||0;sumRow[7]+=rows[i][7]||0;sumRow[8]+=rows[i][8]||0;sumRow[9]+=rows[i][9]||0}
-  rows.push(sumRow);
-  // 調帳 / 匯款 — 區間模式歸 0 / 空；整月模式沿用 existingRec
-  const discReason=hasRange?'':(existingRec?.discountReason||'');
-  const discAmt=hasRange?0:(existingRec?.discountAmt||0);
-  const payDate=hasRange?'':(existingRec?.payDate||'');
-  const payAmt=hasRange?Math.round(sumRow[7]-sumRow[8]):(existingRec?.payAmt||Math.round(sumRow[7]-sumRow[8]));
-  rows.push([]);rows.push([]);
-  rows.push(['調帳原因',discReason]);
-  rows.push(['調帳金額',discAmt]);
-  rows.push([]);rows.push([]);
-  rows.push(['訂單金額小計',sumRow[7]]);
-  rows.push(['好糰折扣小計',sumRow[6]]);
-  rows.push(['調帳金額小計',discAmt]);
-  rows.push(['合計',sumRow[7]+discAmt]);
-  rows.push([]);
-  rows.push(['本期服務費',sumRow[8]]);
-  rows.push(['應收合計',sumRow[7]-sumRow[8]+discAmt]);
-  rows.push([]);
-  rows.push(['匯款日期',payDate]);
-  rows.push(['匯款金額',payAmt]);
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'好糰上傳');
-  const fn=hasRange
-    ?(df===dt?`對帳單_${merchant}_${df}.xlsx`:`對帳單_${merchant}_${df}_至_${dt}.xlsx`)
-    :`對帳單_${merchant}_${year}年${month}月.xlsx`;
-  XLSX.writeFile(wb,fn);
-  const modeDesc=hasRange?(df===dt?`（${df} 單日）`:`（${df} ~ ${dt}）`):`（${year}年${month}月整月）`;
-  notify(`✅ 對帳單已匯出 ${modeDesc}`);
 }
 function importReconExcel(inp){
   const merchant=el('reconMerchant')?.value||'';
