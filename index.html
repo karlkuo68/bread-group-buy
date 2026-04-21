@@ -2340,7 +2340,13 @@ function regenerateReconFromBatches(df,dt,merchant,preserveMeta){
     }
   }
   const orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
-  orders.forEach(o=>{o.base=o.amount;o.fee=Math.round(o.amount*0.17);o.recv=o.amount-o.fee});
+  // 公式：基礎 = 金額 - 折扣； 服務費 = 基礎 × 17%； 應收 = 金額 - 服務費
+  orders.forEach(o=>{
+    const disc=o.discount||0;
+    o.base=(o.amount||0)-disc;
+    o.fee=Math.round(o.base*0.17);
+    o.recv=(o.amount||0)-o.fee;
+  });
   if(preserveMeta&&old.orders){
     const oldByOid={};for(const o of old.orders)oldByOid[o.oid]=o;
     orders.forEach(o=>{
@@ -2621,7 +2627,7 @@ function editReconOrder(key,idx){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div><label style="font-size:11px;color:var(--muted)">商品總金額</label><input type="number" class="inp" id="roe_amount" value="${+o.amount||0}" style="width:100%;font-family:'DM Mono',monospace"></div>
       <div><label style="font-size:11px;color:var(--muted)">好糰折扣</label><input type="number" class="inp" id="roe_discount" value="${+o.discount||0}" style="width:100%;font-family:'DM Mono',monospace"></div>
-      <div><label style="font-size:11px;color:var(--muted)">服務費計算基礎</label><input type="number" class="inp" id="roe_base" value="${+(o.base||o.amount||0)}" style="width:100%;font-family:'DM Mono',monospace"></div>
+      <div><label style="font-size:11px;color:var(--muted)">服務費計算基礎（店家發票金額）</label><input type="number" class="inp" id="roe_base" value="${+(o.base||o.amount||0)}" style="width:100%;font-family:'DM Mono',monospace"></div>
       <div><label style="font-size:11px;color:var(--muted)">服務費</label><input type="number" class="inp" id="roe_fee" value="${+o.fee||0}" style="width:100%;font-family:'DM Mono',monospace"></div>
       <div><label style="font-size:11px;color:var(--muted)">應收</label><input type="number" class="inp" id="roe_recv" value="${+o.recv||0}" style="width:100%;font-family:'DM Mono',monospace;font-weight:700;color:var(--bread)"></div>
       <div><label style="font-size:11px;color:var(--muted)">對帳結果</label>
@@ -2631,9 +2637,11 @@ function editReconOrder(key,idx){
         </select>
       </div>
     </div>
-    <div style="padding:10px 12px;background:var(--warm);border-radius:6px;margin-bottom:14px;font-size:12px;line-height:1.7">
+    <div style="padding:10px 12px;background:var(--warm);border-radius:6px;margin-bottom:14px;font-size:12px;line-height:1.8">
       <div style="font-weight:700;color:var(--crust);margin-bottom:4px">💡 公式小幫手</div>
-      <div>基礎 = 商品金額 − 折扣 ｜ 服務費 = 基礎 × 17% ｜ 應收 = 基礎 − 服務費</div>
+      <div>服務費計算基礎（店家發票金額） = 商品總金額 − 好糰折扣</div>
+      <div>服務費 = (商品總金額 − 好糰折扣) × 17%</div>
+      <div>應收 = 商品總金額 − 服務費</div>
       <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="reconOrderRecalc()">🧮 依公式自動重算（基礎/服務費/應收）</button>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -2644,12 +2652,13 @@ function editReconOrder(key,idx){
   document.body.appendChild(ov);
 }
 // 依公式自動重算基礎/服務費/應收
+// 公式：基礎（店家發票金額） = 金額 - 折扣； 服務費 = (金額 - 折扣) × 17%； 應收 = 金額 - 服務費
 function reconOrderRecalc(){
   const amt=+el('roe_amount').value||0;
   const disc=+el('roe_discount').value||0;
   const base=amt-disc;
   const fee=Math.round(base*0.17);
-  const recv=base-fee;
+  const recv=amt-fee;
   el('roe_base').value=base;
   el('roe_fee').value=fee;
   el('roe_recv').value=recv;
