@@ -409,9 +409,18 @@ tbody td{padding:8px 11px;vertical-align:top}
     </div>
     <div class="card" id="adminCard">
       <div class="card-title">👥 帳號管理（管理者）</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;padding:8px 10px;background:var(--warm);border-radius:6px;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--crust);font-weight:700;min-width:fit-content">🔍 篩選</label>
+        <select class="select-in" id="userFilter" onchange="renderUsers()" style="min-width:200px;flex:1">
+          <option value="all">全部帳號</option>
+          <option value="internal">好糰內部（負責人／管理者／客服）</option>
+        </select>
+        <span id="userFilterCount" style="font-size:11px;color:var(--muted)"></span>
+      </div>
       <div class="user-list" id="userList"></div>
       <div class="divider"></div>
       <div class="section-title">新增帳號</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">※ 每個商家最多可建立 <strong>3 個</strong>帳號（含待核可）</div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;gap:7px;flex-wrap:wrap"><input class="inp" id="newPhone" placeholder="電話（帳號）" style="width:150px"><input class="inp" id="newPw" placeholder="密碼" style="width:130px"><select class="select-in" id="newRole"><option value="merchant">商家</option><option value="cs">客服人員</option><option value="admin">管理者</option></select></div>
         <div style="display:flex;gap:7px;flex-wrap:wrap"><input class="inp" id="newNick" placeholder="暱稱" style="width:130px"><select class="select-in" id="newBiz" style="width:180px"><option value="">（選擇商家）</option></select><button class="btn btn-primary btn-sm" onclick="addUser()">＋ 新增</button></div>
@@ -502,7 +511,14 @@ function doLogin(){
   const users=DB.get('users')||[];const f=users.find(x=>x.phone===u&&x.password===p);
   if(!f){el('loginErr').textContent='帳號或密碼錯誤';return}
   if(f.approved===false){el('loginErr').textContent='帳號尚未核可，請聯繫管理者';return}
+  if(f.locked){el('loginErr').textContent=`此帳號已被鎖定（${f.lockedAt||''}），請聯繫管理者解鎖`;return}
   CUR=f;localStorage.setItem('bread_session',JSON.stringify({phone:u,role:f.role,ts:Date.now()}));enterApp();
+}
+// 商家帳號上限（含待核可）
+const MERCHANT_USER_LIMIT=3;
+function countMerchantUsers(businessName,users){
+  const u=users||DB.get('users',[])||[];
+  return u.filter(x=>x.role==='merchant'&&x.businessName===businessName).length;
 }
 function doRegister(){
   const phone=el('regPhone').value.trim(),pw=el('regPass').value,pw2=el('regPass2').value,role=el('regRole').value,nick=el('regNickname').value.trim(),biz=el('regBusiness').value.trim(),err=el('regErr');
@@ -510,6 +526,11 @@ function doRegister(){
   if(pw!==pw2){err.textContent='密碼不一致';return}if(!nick){err.textContent='請輸入暱稱';return}
   if(role==='merchant'&&!biz){err.textContent='商家請選擇商家名稱';return}
   const users=DB.get('users')||[];if(users.find(x=>x.phone===phone)){err.textContent='此電話已被註冊';return}
+  // 商家上限檢查
+  if(role==='merchant'){
+    const cnt=countMerchantUsers(biz,users);
+    if(cnt>=MERCHANT_USER_LIMIT){err.textContent=`「${biz}」帳號數已達上限 ${MERCHANT_USER_LIMIT} 個，請聯絡管理者`;return}
+  }
   users.push({phone,password:pw,role,nickname:nick,businessName:role==='merchant'?biz:'',approved:false,createdAt:new Date().toLocaleString('zh-TW')});
   DB.set('users',users);notify('✅ 註冊成功！請等待管理者核可後即可登入。');showLogin();
 }
@@ -534,39 +555,131 @@ function addUser(){
   if(!phone||!pw){notify('電話和密碼不可空白',true);return}if(!nick){notify('請填暱稱',true);return}
   if(rl==='merchant'&&!biz){notify('商家需填商家名稱',true);return}
   const u=DB.get('users')||[];if(u.find(x=>x.phone===phone)){notify('電話已存在',true);return}
+  // 商家上限檢查
+  if(rl==='merchant'){
+    const cnt=countMerchantUsers(biz,u);
+    if(cnt>=MERCHANT_USER_LIMIT){notify(`「${biz}」帳號已達上限 ${MERCHANT_USER_LIMIT} 個，無法新增`,true);return}
+  }
   u.push({phone,password:pw,role:rl,nickname:nick,businessName:rl==='merchant'?biz:'',approved:true,createdAt:new Date().toLocaleString('zh-TW')});
   DB.set('users',u);renderUsers();['newPhone','newPw','newNick','newBiz'].forEach(id=>el(id).value='');notify(`✅ 已新增 ${nick}`);
 }
-function delUser(p){if(p===CUR.phone){notify('不能刪除自己',true);return}DB.set('users',(DB.get('users')||[]).filter(x=>x.phone!==p));renderUsers();notify('已刪除')}
+function delUser(p){
+  if(!CUR||(!isAdmin(CUR.role)&&CUR.role!=='owner')){notify('權限不足',true);return}
+  if(p===CUR.phone){notify('不能刪除自己',true);return}
+  const users=DB.get('users')||[];const f=users.find(x=>x.phone===p);if(!f)return;
+  if(f.role==='owner'){notify('不能刪除負責人',true);return}
+  if(!confirm(`確定要刪除「${f.nickname}」(${f.phone})？\n\n⚠️ 此動作無法復原。\n如只是暫停使用，建議用「🔒 鎖定」代替。`))return;
+  DB.set('users',users.filter(x=>x.phone!==p));renderUsers();notify(`已刪除「${f.nickname}」`);
+}
 function approveUser(p){
   const users=DB.get('users')||[];const f=users.find(x=>x.phone===p);if(!f)return;
   // 管理者帳號只能由負責人核可
   if(f.role==='admin'&&CUR.role!=='owner'){notify('管理者帳號需由負責人核可',true);return}
+  // 商家上限：核可前再檢查一次（避免多人註冊超過上限）
+  if(f.role==='merchant'){
+    const approvedCnt=users.filter(x=>x.role==='merchant'&&x.businessName===f.businessName&&x.approved&&x.phone!==f.phone).length;
+    if(approvedCnt>=MERCHANT_USER_LIMIT){notify(`「${f.businessName}」已核可帳號達上限 ${MERCHANT_USER_LIMIT} 個，無法再核可`,true);return}
+  }
   f.approved=true;DB.set('users',users);renderUsers();notify(`✅ 已核可「${f.nickname}」`);
+}
+// 動態填入「篩選」選單的商家選項（顯示 n/3 使用量）
+function populateUserFilter(users){
+  const sel=el('userFilter');if(!sel)return;
+  const saved=sel.value||'all';
+  const merchants=[...new Set((users||[]).filter(u=>u.role==='merchant').map(u=>u.businessName).filter(Boolean))].sort();
+  const opts=['<option value="all">全部帳號</option>','<option value="internal">好糰內部（負責人／管理者／客服）</option>'];
+  if(merchants.length){
+    opts.push('<option value="" disabled>─── 商家 ───</option>');
+    merchants.forEach(m=>{
+      const cnt=users.filter(u=>u.role==='merchant'&&u.businessName===m).length;
+      const full=cnt>=MERCHANT_USER_LIMIT?'（已滿）':'';
+      opts.push(`<option value="merchant:${m}">🏪 ${m} (${cnt}/${MERCHANT_USER_LIMIT})${full}</option>`);
+    });
+  }
+  sel.innerHTML=opts.join('');
+  if([...sel.options].some(o=>o.value===saved))sel.value=saved;
 }
 function renderUsers(){
   const u=DB.get('users')||[];
-  const pending=u.filter(x=>x.approved===false);
-  const approved=u.filter(x=>x.approved!==false);
+  populateUserFilter(u);
+  const filter=el('userFilter')?.value||'all';
+  // 套用篩選
+  let view=u;
+  if(filter==='internal'){view=u.filter(x=>['owner','admin','cs'].includes(x.role))}
+  else if(filter.startsWith('merchant:')){
+    const biz=filter.slice(9);
+    view=u.filter(x=>x.role==='merchant'&&x.businessName===biz);
+  }
+  if(el('userFilterCount'))el('userFilterCount').textContent=`共 ${view.length} 筆 / 總計 ${u.length} 筆`;
+  const pending=view.filter(x=>x.approved===false);
+  const approved=view.filter(x=>x.approved!==false);
+  // 操作按鈕 HTML 產生器
+  const actBtns=x=>{
+    const canManage=isAdmin(CUR?.role)&&x.phone!==CUR?.phone&&x.role!=='owner';
+    const canManageOwner=CUR?.role==='owner'&&x.phone!==CUR?.phone;
+    if(!canManage&&!canManageOwner)return'';
+    // owner 只能由自己改，不給其他人操作
+    if(x.role==='owner'&&CUR?.role!=='owner')return'';
+    const lockIcon=x.locked?'🔓':'🔒';
+    const lockTitle=x.locked?'解鎖帳號':'鎖定帳號（禁止登入）';
+    return `<span style="margin-left:auto;display:inline-flex;gap:4px;flex-shrink:0">
+      <button class="user-del" style="color:var(--crust)" title="改暱稱" onclick="editNickname('${x.phone}')">✏️</button>
+      <button class="user-del" style="color:var(--crust)" title="改密碼" onclick="editPassword('${x.phone}')">🔑</button>
+      <button class="user-del" style="color:${x.locked?'var(--green)':'var(--muted)'}" title="${lockTitle}" onclick="toggleLock('${x.phone}')">${lockIcon}</button>
+      <button class="user-del" title="刪除" onclick="delUser('${x.phone}')">✕</button>
+    </span>`;
+  };
   let html='';
   if(pending.length&&isAdmin(CUR?.role)){
-    // 管理者只能看到非admin的待核可；負責人看到全部
     const visiblePending=CUR.role==='owner'?pending:pending.filter(x=>x.role!=='admin');
     const adminPending=pending.filter(x=>x.role==='admin');
     if(visiblePending.length){
       html+='<div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:6px">⏳ 待核可帳號（'+visiblePending.length+'）</div>';
-      html+=visiblePending.map(x=>`<div class="user-row" style="background:#FFF5F0;border:1px solid #F0D0C0;border-radius:8px;padding:8px;margin-bottom:4px"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span><button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;margin-left:auto" onclick="approveUser('${x.phone}')">✓ 核可</button><button class="user-del" onclick="delUser('${x.phone}')">✕</button></div>`).join('');
+      html+=visiblePending.map(x=>`<div class="user-row" style="background:#FFF5F0;border:1px solid #F0D0C0;border-radius:8px;padding:8px;margin-bottom:4px"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${x.locked?'<span style="font-size:10px;color:var(--red)">🔒已鎖定</span>':''}<button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;margin-left:auto" onclick="approveUser('${x.phone}')">✓ 核可</button><button class="user-del" onclick="delUser('${x.phone}')">✕</button></div>`).join('');
       html+='<div style="margin:10px 0;border-top:1px solid #E4D9CC"></div>';
     }
     if(adminPending.length&&CUR.role!=='owner'){
       html+='<div style="font-size:11px;color:var(--muted);margin-bottom:8px">另有 '+adminPending.length+' 個管理者帳號待負責人核可</div>';
     }
   }
-  html+=approved.map(x=>{
-    const canDel=isAdmin(CUR?.role)&&x.phone!==CUR?.phone&&x.role!=='owner';
-    return`<div class="user-row"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${canDel?`<button class="user-del" onclick="delUser('${x.phone}')">✕</button>`:''}</div>`;
-  }).join('');
+  if(approved.length){
+    html+=approved.map(x=>{
+      const lockTag=x.locked?`<span style="font-size:10px;color:#fff;background:var(--red);padding:1px 6px;border-radius:8px" title="鎖定時間：${x.lockedAt||''}">🔒 已鎖定</span>`:'';
+      return`<div class="user-row" style="${x.locked?'opacity:.7':''}"><span style="font-weight:600">${x.nickname}</span><span style="font-size:11px;color:var(--muted)">${x.phone}</span>${x.businessName?`<span style="font-size:11px;color:var(--bread)">${x.businessName}</span>`:''}<span class="user-role ${RC[x.role]}">${RL[x.role]}</span>${lockTag}${actBtns(x)}</div>`;
+    }).join('');
+  }else if(!pending.length){
+    html+='<div class="empty-state" style="padding:24px 10px"><div class="empty-icon">👤</div><div style="font-size:13px;color:var(--muted)">此篩選條件下無帳號</div></div>';
+  }
   el('userList').innerHTML=html;
+}
+// ═══ 帳號管理：改暱稱 / 改密碼 / 鎖定切換 ═══
+function editNickname(phone){
+  if(!CUR||(!isAdmin(CUR.role)&&CUR.role!=='owner')){notify('權限不足',true);return}
+  const users=DB.get('users')||[];const f=users.find(x=>x.phone===phone);if(!f)return;
+  const n=prompt(`修改「${f.nickname}」的暱稱：`,f.nickname);
+  if(n===null)return;
+  const t=n.trim();if(!t){notify('暱稱不可為空',true);return}
+  f.nickname=t;DB.set('users',users);renderUsers();notify(`✅ 暱稱已改為「${t}」`);
+}
+function editPassword(phone){
+  if(!CUR||(!isAdmin(CUR.role)&&CUR.role!=='owner')){notify('權限不足',true);return}
+  const users=DB.get('users')||[];const f=users.find(x=>x.phone===phone);if(!f)return;
+  const p=prompt(`重設「${f.nickname}」(${f.phone}) 的密碼\n（至少 4 碼，留空取消）：`);
+  if(p===null)return;
+  const tp=p.trim();if(tp.length<4){notify('密碼至少 4 碼',true);return}
+  f.password=tp;f.pwdChangedAt=new Date().toLocaleString('zh-TW');f.pwdChangedBy=CUR.nickname||CUR.phone;
+  DB.set('users',users);renderUsers();notify(`✅ 已重設「${f.nickname}」的密碼`);
+}
+function toggleLock(phone){
+  if(!CUR||(!isAdmin(CUR.role)&&CUR.role!=='owner')){notify('權限不足',true);return}
+  const users=DB.get('users')||[];const f=users.find(x=>x.phone===phone);if(!f)return;
+  if(f.role==='owner'){notify('不能鎖定負責人',true);return}
+  const willLock=!f.locked;
+  if(willLock&&!confirm(`確定要鎖定「${f.nickname}」(${f.phone})？\n\n鎖定後該帳號無法登入，但資料完全保留。\n可隨時解鎖恢復使用。`))return;
+  f.locked=willLock;
+  if(willLock){f.lockedAt=new Date().toLocaleString('zh-TW');f.lockedBy=CUR.nickname||CUR.phone}
+  else{delete f.lockedAt;delete f.lockedBy}
+  DB.set('users',users);renderUsers();notify(willLock?`🔒 已鎖定「${f.nickname}」`:`🔓 已解鎖「${f.nickname}」`);
 }
 
 // ═══ SETTINGS ═══

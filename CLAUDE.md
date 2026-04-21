@@ -98,6 +98,30 @@ Firebase Realtime DB
   - 勾選 = 用新資料取代（舊批次對應品項移除，空批次自動刪除）
   - 不勾 = 略過此筆（保留舊資料，新匯入捨棄）
   - 解決「同筆訂單重複計入預覽分裝表」的 bug
+- **刪除無用的貼紙店名/每張最多品項數設定（2026-04-21）**
+  - 調查發現 `G.storeName` 程式完全沒引用（貼紙寫死「好糰 x 商家名稱」）
+  - `G.ipp`（每張貼紙最多品項數）也完全沒引用；實際決定貼紙品項數的是 `G.bagCap`（每袋 = 每張貼紙）
+  - 刪除：HTML set-row、G 物件屬性、loadSettings/saveSettings 裡的對應處理、DB.set('settings',{}) 的鍵
+  - bagCap=8 維持不變，等於「每張貼紙最多 8 項」
+- **對帳搜尋 UX 修正（2026-04-21）**
+  - Ken 回報：設上半月 4/1-4/15，但查詢結果列出 4/22 訂單
+  - 診斷：searchReconRange 邏輯無誤（node 單元測試驗證過濾精準），問題是 Ken 按「查詢」而非「搜尋區間訂單」，或查看明細時顯示整月 cache
+  - 修正：`searchRecon` 最後若有日期區間 + 商家，自動連帶呼叫 `searchReconRange`（按「查詢」就會同時列出對帳紀錄 + 區間訂單）
+  - 修正：`viewReconDetail` / `viewMerchantReconDetail` 的 rec.year/month/merchant 欄位若缺，改用 `parseReconKey(key)` 推回（避免顯示 undefined）
+  - 修正：`regenerateReconFromBatches` 寫入 recon 時補上 `year/month/merchant` 欄位，日後新資料就完整
+- **帳號管理擴充（2026-04-21）**
+  - 商家帳號上限：每個商家最多 3 個帳號（含待核可）；`MERCHANT_USER_LIMIT=3` 常數
+  - `doRegister` / `addUser` / `approveUser` 三處都會檢查；超過會擋下並提示
+  - 帳號篩選下拉：全部 / 好糰內部（owner/admin/cs）/ 各商家（顯示 n/3 使用量）
+  - 動態填入：每次 `renderUsers` 會呼叫 `populateUserFilter` 同步商家選項
+  - 每列操作按鈕（admin/owner 專用，不能對自己、不能對負責人）：
+    - ✏️ 改暱稱（`editNickname`）
+    - 🔑 改密碼（`editPassword`）：至少 4 碼
+    - 🔒 鎖定 / 🔓 解鎖（`toggleLock`）：鎖定後 `doLogin` 拒絕登入，保留資料；解鎖隨時可恢復
+    - ✕ 刪除（`delUser`）：加 confirm 警示；提示先用鎖定代替
+  - 鎖定資料欄位：`locked`, `lockedAt`, `lockedBy`
+  - 密碼變更紀錄：`pwdChangedAt`, `pwdChangedBy`
+  - 刪除保護：不能刪除自己、不能刪除 owner
 - **對帳頁移除年/月下拉選單，改用日期區間推算（2026-04-21）**
   - UI 拿掉 `reconYear` / `reconMonth` 兩個下拉選單
   - 現有查詢欄位：商家選擇、狀態選擇、日期區間
@@ -139,6 +163,9 @@ Firebase Realtime DB
 ## 最近 10 筆 commit
 
 ```
+（下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+（下個 commit）feat(users): 帳號管理擴充（上限 3 / 篩選 / 改暱稱改密碼 / 鎖定解鎖 / 刪除 confirm）（2026-04-21）
+36fd6de cleanup+fix: 刪除無用設定（storeName、ipp）+ 對帳搜尋連動日期區間（2026-04-21）
 6b4f4c2 refactor(recon): 移除年/月下拉，改從日期區間推算；對帳清單列出全部（2026-04-21）
 b3931b4 fix(recon): 匯出對帳單支援日期區間 + 重算時調帳歸零（2026-04-20）
 1a1aad6 fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
