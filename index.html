@@ -2035,7 +2035,13 @@ function downloadReconExcel(key){
   try{
     const header=['取件日期','星期','訂單ID','主聯絡人','外送地址','商品總金額','好糰折扣','服務費計算基礎','服務費','應收','對帳結果 預設正確'];
     const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
-    const rows=[header];
+    // 確保有 serial（若舊資料沒有就補一個）
+    if(!rec.serial){rec.serial=genReconSerial();DB.set('recons',recons)}
+    const rows=[];
+    // metadata 列（重新匯入時會被偵測為相同序號 → 詢問覆蓋）
+    rows.push(['對帳單序號',rec.serial,'商家',mt,'區間',df===dt?df:`${df} ~ ${dt}`]);
+    rows.push([]);
+    rows.push(header);
     const orders=rec.orders||[];
     orders.forEach(o=>{
       const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
@@ -2231,6 +2237,18 @@ function exportReconRangeExcel(){
 function getReconKey(year,month,merchant){return`recon_${year}_${month}_${merchant}`}
 // 新 key 格式（區間對帳，2026-04-21 改）：recon_YYYY-MM-DD_YYYY-MM-DD_商家
 function getReconRangeKey(df,dt,merchant){return`recon_${df}_${dt}_${merchant}`}
+// 對帳單序號格式：R-YYYYMMDD-XXX（XXX 當日流水號）
+function genReconSerial(){
+  const now=new Date();const p=n=>String(n).padStart(2,'0');
+  const dateStr=`${now.getFullYear()}${p(now.getMonth()+1)}${p(now.getDate())}`;
+  const recons=DB.get('recons',{});
+  let maxN=0;const re=new RegExp(`^R-${dateStr}-(\\d+)$`);
+  for(const r of Object.values(recons)){
+    const m=(r?.serial||'').match(re);
+    if(m)maxN=Math.max(maxN,+m[1]);
+  }
+  return `R-${dateStr}-${String(maxN+1).padStart(3,'0')}`;
+}
 // 從 UI 推算目前要操作的 recon key（支援任意區間，每個區間獨立）
 // 有設日期區間 → 用該區間；沒設 → 用今天所在月份 1 日到月底
 function getCurrentReconKey(){
@@ -2338,16 +2356,18 @@ function regenerateReconFromBatches(df,dt,merchant,preserveMeta){
     });
   }
   const[y,m]=df.split('-').map(Number);
+  const keptSerial=old.serial||genReconSerial();
   const newRec=preserveMeta?{
     ...old,orders,
     year:y,month:m,merchant,df,dt,
+    serial:keptSerial,
     status:old.status||'好糰對帳中',
     discountReason:'',
     discountAmt:0,
     payDate:old.payDate||'',
     payAmt:old.payAmt||0,
     rebuiltAt:new Date().toLocaleString('zh-TW')
-  }:{orders,year:y,month:m,merchant,df,dt,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
+  }:{orders,year:y,month:m,merchant,df,dt,serial:keptSerial,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
   recons[key]=newRec;
   DB.set('recons',recons);
   console.log('[regenerateRecon]',key,'orders=',orders.length);
@@ -2396,7 +2416,8 @@ function searchRecon(){
     const discAmt=rec?.discountAmt||0;
     const rebuilt=rec?.rebuiltAt?`<span class="hi-tag" style="background:#f0e6d2;color:var(--crust);font-size:10px">🔄 ${rec.rebuiltAt.slice(5,16)}</span>`:'';
     const discTag=discAmt?`<span class="hi-tag" style="background:#fdf4e3;color:var(--bread);font-size:10px">調帳 ${discAmt>0?'+':''}$${discAmt.toLocaleString()}</span>`:'';
-    html+=`<div class="history-item" data-reconkey="${key}"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${label}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions" style="flex-wrap:wrap">`;
+    const serialTag=rec?.serial?`<span class="hi-tag" style="background:var(--crust);color:#fff;font-size:10px;font-family:'DM Mono',monospace">${rec.serial}</span>`:'';
+    html+=`<div class="history-item" data-reconkey="${key}"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${label}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags">${serialTag}<span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions" style="flex-wrap:wrap">`;
     const escKey=key.replace(/'/g,"\\'");
     if(CUR?.role==='merchant'){
       if(status==='店家對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="openMerchantRecon('${escKey}')">開始對帳</button>`;
@@ -2452,50 +2473,83 @@ function importReconExcel(inp){
     const ws=wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(ws,{header:1});
     if(rows.length<2){notify('檔案無資料',true);inp.value='';return}
-    // 解析訂單行（跳過表頭，到合計行為止）
+    // 掃描序號（從前幾列找「對帳單序號」）
+    let importSerial='';
+    for(let i=0;i<Math.min(rows.length,6);i++){
+      const r=rows[i]||[];
+      for(let j=0;j<r.length;j++){
+        if(String(r[j]||'').trim()==='對帳單序號'){importSerial=String(r[j+1]||'').trim();break}
+      }
+      if(importSerial)break;
+    }
+    // 找 header row（含「訂單ID」的那列）
+    let headerIdx=-1;
+    for(let i=0;i<rows.length;i++){
+      if(rows[i]&&(rows[i].indexOf('訂單ID')!==-1)){headerIdx=i;break}
+    }
+    if(headerIdx<0){notify('檔案格式錯誤：找不到訂單表頭',true);inp.value='';return}
+    // 解析訂單行（從 header 下一行開始，到合計行為止）
     const orders=[];let discountReason='',discountAmt=0,payDate='',payAmt=0;
-    for(let i=1;i<rows.length;i++){
-      const r=rows[i];
+    for(let i=headerIdx+1;i<rows.length;i++){
+      const r=rows[i];if(!r)continue;
       if(r[2]==='合計'||r[0]==='合計')break;
-      if(!r[2])continue;// skip empty
+      if(!r[2])continue;
       orders.push({pickTime:r[0]||'',weekday:r[1]||'',oid:String(r[2]),buyer:r[3]||'',addr:r[4]||'',amount:+r[5]||0,discount:+r[6]||0,base:+r[7]||0,fee:+r[8]||0,recv:+r[9]||0,result:r[10]||''});
     }
     for(let i=0;i<rows.length;i++){
-      if(rows[i][0]==='調帳原因') discountReason=rows[i][1]||'';
-      if(rows[i][0]==='調帳金額') discountAmt=+rows[i][1]||0;
-      if(rows[i][0]==='匯款日期') payDate=fmtPayDate(rows[i][1]||'');
-      if(rows[i][0]==='匯款金額') payAmt=+rows[i][1]||0;
+      if(rows[i]&&rows[i][0]==='調帳原因')discountReason=rows[i][1]||'';
+      if(rows[i]&&rows[i][0]==='調帳金額')discountAmt=+rows[i][1]||0;
+      if(rows[i]&&rows[i][0]==='匯款日期')payDate=fmtPayDate(rows[i][1]||'');
+      if(rows[i]&&rows[i][0]==='匯款金額')payAmt=+rows[i][1]||0;
     }
-    // 🔑 從 Excel 內訂單日期自動推算區間（避免覆蓋既有的其他區間對帳單）
+    // 從 Excel 內訂單日期推算區間
     const allDates=orders.map(o=>normDate(o.pickTime)).filter(Boolean).sort();
     let df,dt;
-    if(allDates.length){
-      df=allDates[0];dt=allDates[allDates.length-1];
-    }else{
-      // 沒訂單 → fallback 到 UI 的日期區間或當月
+    if(allDates.length){df=allDates[0];dt=allDates[allDates.length-1];}
+    else{
       const ctx=getCurrentReconKey();
       if(!ctx){notify('無法決定對帳單區間（Excel 無訂單、UI 也沒設區間）',true);inp.value='';return}
       df=ctx.df;dt=ctx.dt;
     }
     const[year,month]=df.split('-').map(Number);
-    const key=getReconRangeKey(df,dt,merchant);
+    const newKey=getReconRangeKey(df,dt,merchant);
     const recons=DB.get('recons',{});
-    const existing=recons[key];
-    if(existing){
-      if(existing.archivedAt){
-        notify(`❌ 區間 ${df} ~ ${dt} 的對帳單已封存於資料庫，請先取消封存`,true);
-        inp.value='';return;
-      }
-      if(!confirm(`已存在相同區間對帳單：${merchant} · ${df===dt?df:`${df} ~ ${dt}`}\n（${existing.orders?.length||0} 筆、狀態：${existing.status||'好糰對帳中'}）\n\n覆蓋嗎？`)){
-        inp.value='';return;
+    // 🔑 序號優先：若 Excel 有序號且既存紀錄含相同序號 → 詢問覆蓋
+    let serialMatch=null;
+    if(importSerial){
+      for(const[k,r] of Object.entries(recons)){
+        if(r?.serial===importSerial){serialMatch={key:k,rec:r};break}
       }
     }
-    console.log('[importRecon] 解析完成',{orders:orders.length,df,dt,discountReason,discountAmt});
-    recons[key]={year,month,merchant,df,dt,status:'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname||CUR.phone||''};
+    let targetKey=newKey;
+    if(serialMatch){
+      if(serialMatch.rec.archivedAt){notify(`❌ 序號 ${importSerial} 已封存於資料庫，請先取消封存`,true);inp.value='';return}
+      const ex=serialMatch.rec;
+      const msg=`🔍 發現相同序號「${importSerial}」的對帳單：\n\n`+
+        `・商家：${ex.merchant}\n`+
+        `・區間：${ex.df} ~ ${ex.dt}\n`+
+        `・筆數：${ex.orders?.length||0}\n`+
+        `・狀態：${ex.status||'好糰對帳中'}\n\n`+
+        `要覆蓋這筆對帳單嗎？\n`+
+        (serialMatch.key!==newKey?`（匯入後區間為 ${df} ~ ${dt}，舊紀錄會先刪除再重建）`:'');
+      if(!confirm(msg)){inp.value='';return}
+      if(serialMatch.key!==newKey)delete recons[serialMatch.key];
+      targetKey=newKey;
+    }else{
+      // 無序號或序號不匹配 → 依區間 key 判斷是否覆蓋
+      const existing=recons[newKey];
+      if(existing){
+        if(existing.archivedAt){notify(`❌ 區間 ${df} ~ ${dt} 的對帳單已封存於資料庫，請先取消封存`,true);inp.value='';return}
+        if(!confirm(`已存在相同區間對帳單：${merchant} · ${df===dt?df:`${df} ~ ${dt}`}\n（${existing.orders?.length||0} 筆、狀態：${existing.status||'好糰對帳中'}）\n\n覆蓋嗎？`)){inp.value='';return}
+      }
+    }
+    // 保留序號優先順序：Excel > 既有 serialMatch > 既有 targetKey recon > 新生成
+    const finalSerial=importSerial||serialMatch?.rec?.serial||recons[targetKey]?.serial||genReconSerial();
+    recons[targetKey]={year,month,merchant,df,dt,serial:finalSerial,status:serialMatch?.rec?.status||'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname||CUR.phone||''};
     DB.set('recons',recons);
-    console.log('[importRecon] 已寫入 DB key=',key,'orders=',orders.length);
+    console.log('[importRecon] 已寫入',targetKey,'serial=',finalSerial);
     searchRecon();
-    notify(`✅ 已匯入 ${orders.length} 筆對帳資料（${df===dt?df:`${df} ~ ${dt}`}）`);
+    notify(`✅ 已匯入 ${orders.length} 筆（序號 ${finalSerial}${serialMatch?'・覆蓋':'・新增'}）`);
   };
   reader.readAsArrayBuffer(f);inp.value='';
 }
@@ -2561,8 +2615,10 @@ function viewReconDetail(key){
   const sendLabel=curStatus==='好糰對帳中'?'📤 送出對帳單':'🔁 重新送出';
   const sendTitle=curStatus==='好糰對帳中'?'送出給商家開始對帳':'已送出過，點此重新送出';
   const sendBtn=isAdmin(CUR?.role)?`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="${sendTitle}">${sendLabel}</button>`:'';
+  const serialBadge=rec.serial?`<span style="font-family:'DM Mono',monospace;font-size:11px;padding:2px 8px;background:var(--crust);color:#fff;border-radius:10px">${rec.serial}</span>`:'';
   let html=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;background:var(--warm);border-radius:6px;flex-wrap:wrap">
     <button class="btn btn-ghost btn-sm" onclick="backFromReconDetail()">← 回到上一頁</button>
+    ${serialBadge}
     <span style="font-size:13px;font-weight:700;color:var(--crust)">${mt} · ${label}</span>
     <span style="font-size:12px;color:var(--muted)">狀態：${rec.status||'好糰對帳中'}</span>
     <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
