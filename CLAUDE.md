@@ -233,6 +233,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+666d4f2 cleanup: 刪除對帳作業頂部「匯出對帳單」按鈕與函式（2026-04-21）
 81d25ec fix(recon): 對帳作業查詢加入日期區間篩選（2026-04-21）
 a32b0e7 fix(recon): importReconExcel 改從 Excel 內訂單日期推 key，不再覆蓋（2026-04-21）
 c670996 ui(recon): 送出按鈕送出後仍保留（改顯示「重新送出」）（2026-04-21）
