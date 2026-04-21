@@ -335,11 +335,10 @@ tbody td{padding:8px 11px;vertical-align:top}
         <button class="btn btn-primary btn-sm" onclick="generateRecon()">🧾 生成對帳單</button>
         <button class="btn btn-blue btn-sm" onclick="searchRecon()">🔍 查詢</button>
       </div>
-      <!-- 第二排：匯出 / 匯入 / 送出 / 重算 -->
+      <!-- 第二排：匯出 / 匯入 / 重算（送出移到每筆對帳單與明細頁） -->
       <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" class="hidden">
         <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">⬇️ 匯出對帳單</button>
         <label class="btn btn-green btn-sm" id="btnReconImport">⬆️ 匯入對帳單<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
-        <button class="btn btn-primary btn-sm hidden" id="btnReconSend" onclick="sendRecon()">📤 送出對帳單</button>
         <button class="btn btn-ghost btn-sm" id="btnReconRebuild" onclick="rebuildReconFromBatches()" title="用最新訂單批次重算對帳單（保留匯款/狀態；調帳歸零）">🔄 重算對帳單</button>
         <button class="btn btn-primary btn-sm hidden" id="btnReconInvoice" onclick="markInvoiced()">標記發票已開立</button>
       </div>
@@ -2404,6 +2403,7 @@ function searchRecon(){
       if(rec&&isAdmin(CUR?.role)){
         if(status==='店家對帳完成')html+=`<button class="btn btn-green btn-sm" onclick="markInvoiced('${escKey}')">標記發票已開立</button>`;
         html+=`<button class="btn btn-ghost btn-sm" onclick="archiveRecon('${escKey}')" title="封存到資料庫永久保存">📦 封存</button>`;
+        if(status==='好糰對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="送出給商家開始對帳">📤 送出對帳單</button>`;
         html+=`<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="delRecon('${escKey}')" title="刪除">✕</button>`;
       }
     }
@@ -2421,7 +2421,6 @@ function searchRecon(){
     el('reconActions').classList.remove('hidden');
     const ctx=getCurrentReconKey();
     const rec=ctx?recons[ctx.key]:null;
-    el('btnReconSend').classList.toggle('hidden',!rec||rec.status!=='好糰對帳中');
     el('btnReconInvoice').classList.toggle('hidden',!rec||rec.status!=='店家對帳完成');
   }else if(!isAdmin(CUR?.role)){
     el('reconActions').classList.add('hidden');
@@ -2536,10 +2535,15 @@ function importReconExcel(inp){
   };
   reader.readAsArrayBuffer(f);inp.value='';
 }
+// 原本的 sendRecon (從頂部按鈕，已移除) 改呼叫 sendReconByKey
 function sendRecon(){
   const ctx=getCurrentReconKey();
   if(!ctx){notify('請選擇商家',true);return}
-  const{key}=ctx;
+  sendReconByKey(ctx.key);
+}
+// 送出指定 key 的對帳單（給列表每筆 + 明細頁按鈕用）
+function sendReconByKey(key){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以送出對帳單',true);return}
   const recons=DB.get('recons',{});
   if(!recons[key]){notify('尚無對帳資料，請先匯出再匯入',true);return}
   recons[key].status='店家對帳中';
@@ -2572,12 +2576,15 @@ function viewReconDetail(key){
   const mt=rec.merchant||parsed.merchant||'—';
   const label=parsed.label||(rec.df&&rec.dt?`${rec.df} ~ ${rec.dt}`:`${rec.year||'—'}/${rec.month||'—'}`);
   const escKey=key.replace(/'/g,"\\'");
+  const canSend=isAdmin(CUR?.role)&&(rec.status||'好糰對帳中')==='好糰對帳中';
+  const sendBtn=canSend?`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="送出給商家開始對帳">📤 送出對帳單</button>`:'';
   let html=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;background:var(--warm);border-radius:6px;flex-wrap:wrap">
     <button class="btn btn-ghost btn-sm" onclick="backFromReconDetail()">← 回到上一頁</button>
     <span style="font-size:13px;font-weight:700;color:var(--crust)">${mt} · ${label}</span>
     <span style="font-size:12px;color:var(--muted)">狀態：${rec.status||'好糰對帳中'}</span>
     <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="downloadReconExcel('${escKey}')">⬇️ 下載 Excel</button>
+      ${sendBtn}
     </span>
   </div>`;
   html+=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th style="text-align:right">金額</th><th style="text-align:right">折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
