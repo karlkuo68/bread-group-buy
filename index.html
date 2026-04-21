@@ -2663,6 +2663,25 @@ function reconOrderRecalc(){
   el('roe_fee').value=fee;
   el('roe_recv').value=recv;
 }
+// 儲存對帳單頂層的調帳/匯款欄位（由明細頁 💾 按鈕觸發）
+function saveReconEdits(key){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以儲存',true);return}
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec){notify('找不到對帳單',true);return}
+  if(rec.archivedAt){notify('此對帳單已封存，請先取消封存再編輯',true);return}
+  const discReason=(el('rec_discountReason')?.value||'').trim();
+  const discAmt=+(el('rec_discountAmt')?.value||0)||0;
+  const payDate=(el('rec_payDate')?.value||'').trim();
+  const payAmt=+(el('rec_payAmt')?.value||0)||0;
+  rec.discountReason=discReason;
+  rec.discountAmt=discAmt;
+  rec.payDate=payDate;
+  rec.payAmt=payAmt;
+  rec.updatedAt=new Date().toLocaleString('zh-TW');
+  rec.updatedBy=CUR?.nickname||CUR?.phone||'';
+  DB.set('recons',recons);
+  notify('💾 對帳單已儲存');
+  viewReconDetail(key);// 重 render 讓小計與差額即時更新
+}
 function saveReconOrderEdit(key,idx){
   if(!isAdmin(CUR?.role)){notify('權限不足',true);return}
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec||!rec.orders||!rec.orders[idx])return;
@@ -2755,7 +2774,7 @@ function viewReconDetail(key){
       <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tRecv.toLocaleString()}</td>
       <td></td>${canEditOrder?'<td></td>':''}
     </tr></tbody></table></div>`;
-  // 調帳與匯款小計區（兩欄網格）— 跟 Excel 底部資訊一致
+  // 調帳與匯款小計區（兩欄網格）— 管理者可編輯；商家/客服唯讀
   const discAmt=rec.discountAmt||0;
   const totalPlusAdj=tAmt+discAmt;
   const recvPlusAdj=tRecv+discAmt;
@@ -2763,18 +2782,39 @@ function viewReconDetail(key){
   const payAmt=rec.payAmt||0;
   const diff=recvPlusAdj-payAmt;
   const diffStyle=diff!==0?'color:#c55;font-weight:700':'color:#27ae60;font-weight:700';
-  html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-    <div style="padding:10px 14px;background:#fff8f0;border:1px solid #f0e0c8;border-radius:6px;font-size:12px;line-height:1.9">
-      <div style="font-weight:700;color:var(--crust);margin-bottom:4px">💰 調帳資訊</div>
-      <div>調帳原因：<strong>${rec.discountReason||'—'}</strong></div>
-      <div>調帳金額：<strong style="color:${discAmt<0?'#c55':'#27ae60'};font-family:'DM Mono',monospace">${discAmt>0?'+':''}$${discAmt.toLocaleString()}</strong></div>
+  const readOnly=!canEditOrder||rec.archivedAt;
+  if(readOnly){
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div style="padding:10px 14px;background:#fff8f0;border:1px solid #f0e0c8;border-radius:6px;font-size:12px;line-height:1.9">
+        <div style="font-weight:700;color:var(--crust);margin-bottom:4px">💰 調帳資訊</div>
+        <div>調帳原因：<strong>${rec.discountReason||'—'}</strong></div>
+        <div>調帳金額：<strong style="color:${discAmt<0?'#c55':'#27ae60'};font-family:'DM Mono',monospace">${discAmt>0?'+':''}$${discAmt.toLocaleString()}</strong></div>
+      </div>
+      <div style="padding:10px 14px;background:#f0f8ff;border:1px solid #d8e4f0;border-radius:6px;font-size:12px;line-height:1.9">
+        <div style="font-weight:700;color:var(--crust);margin-bottom:4px">🏦 匯款資訊</div>
+        <div>匯款日期：<strong>${pd||'—'}</strong></div>
+        <div>匯款金額：<strong style="font-family:'DM Mono',monospace">$${payAmt.toLocaleString()}</strong></div>
+      </div>
+    </div>`;
+  }else{
+    // 可編輯版：input 欄位
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div style="padding:10px 14px;background:#fff8f0;border:1px solid #f0e0c8;border-radius:6px;font-size:12px;line-height:1.7">
+        <div style="font-weight:700;color:var(--crust);margin-bottom:6px">💰 調帳資訊（可編輯）</div>
+        <div style="margin-bottom:6px"><label style="display:block;color:var(--muted);font-size:11px;margin-bottom:2px">調帳原因</label><input type="text" class="inp" id="rec_discountReason" value="${(rec.discountReason||'').replace(/"/g,'&quot;')}" style="width:100%" placeholder="例：退貨補償"></div>
+        <div><label style="display:block;color:var(--muted);font-size:11px;margin-bottom:2px">調帳金額（可正負）</label><input type="number" class="inp" id="rec_discountAmt" value="${discAmt}" style="width:100%;font-family:'DM Mono',monospace" step="1"></div>
+      </div>
+      <div style="padding:10px 14px;background:#f0f8ff;border:1px solid #d8e4f0;border-radius:6px;font-size:12px;line-height:1.7">
+        <div style="font-weight:700;color:var(--crust);margin-bottom:6px">🏦 匯款資訊（可編輯）</div>
+        <div style="margin-bottom:6px"><label style="display:block;color:var(--muted);font-size:11px;margin-bottom:2px">匯款日期</label><input type="date" class="inp" id="rec_payDate" value="${pd||''}" style="width:100%"></div>
+        <div><label style="display:block;color:var(--muted);font-size:11px;margin-bottom:2px">匯款金額</label><input type="number" class="inp" id="rec_payAmt" value="${payAmt}" style="width:100%;font-family:'DM Mono',monospace" step="1"></div>
+      </div>
     </div>
-    <div style="padding:10px 14px;background:#f0f8ff;border:1px solid #d8e4f0;border-radius:6px;font-size:12px;line-height:1.9">
-      <div style="font-weight:700;color:var(--crust);margin-bottom:4px">🏦 匯款資訊</div>
-      <div>匯款日期：<strong>${pd||'—'}</strong></div>
-      <div>匯款金額：<strong style="font-family:'DM Mono',monospace">$${payAmt.toLocaleString()}</strong></div>
-    </div>
-  </div>`;
+    <div class="btn-row" style="margin-bottom:10px">
+      <button class="btn btn-primary" onclick="saveReconEdits('${escKey}')">💾 儲存對帳單</button>
+      <span style="font-size:11px;color:var(--muted);align-self:center">（只改儲存調帳/匯款；訂單金額改用訂單列的 ✏️ 即時儲存）</span>
+    </div>`;
+  }
   // 金額小計區塊（跟 Excel 底部一致）
   html+=`<div style="padding:12px 16px;background:#f9f6f0;border:1.5px solid var(--warm);border-radius:8px;font-size:13px;line-height:2">
     <div style="font-weight:700;color:var(--crust);margin-bottom:6px;font-size:14px">📊 金額小計</div>
