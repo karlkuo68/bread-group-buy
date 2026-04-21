@@ -2499,11 +2499,8 @@ function exportReconExcel(){
   notify(`✅ 對帳單已匯出 ${modeDesc}`);
 }
 function importReconExcel(inp){
-  const ctx=getCurrentReconKey();
-  if(!ctx){notify('請先選擇商家',true);inp.value='';return}
-  const{df,dt,merchant}=ctx;
-  const[year,month]=df.split('-').map(Number);
-  if(!merchant){notify('請選擇商家',true);inp.value='';return}
+  const merchant=el('reconMerchant')?.value||'';
+  if(!merchant){notify('請先選擇商家',true);inp.value='';return}
   const f=inp.files[0];if(!f){return}
   const reader=new FileReader();
   reader.onload=function(e){
@@ -2520,20 +2517,42 @@ function importReconExcel(inp){
       if(!r[2])continue;// skip empty
       orders.push({pickTime:r[0]||'',weekday:r[1]||'',oid:String(r[2]),buyer:r[3]||'',addr:r[4]||'',amount:+r[5]||0,discount:+r[6]||0,base:+r[7]||0,fee:+r[8]||0,recv:+r[9]||0,result:r[10]||''});
     }
-    // 找調帳和匯款資訊（調帳原因/調帳金額各在獨立一行，值在 B 欄 index 1）
     for(let i=0;i<rows.length;i++){
       if(rows[i][0]==='調帳原因') discountReason=rows[i][1]||'';
       if(rows[i][0]==='調帳金額') discountAmt=+rows[i][1]||0;
       if(rows[i][0]==='匯款日期') payDate=fmtPayDate(rows[i][1]||'');
       if(rows[i][0]==='匯款金額') payAmt=+rows[i][1]||0;
     }
-    console.log('[importRecon] 解析完成',{orders:orders.length,discountReason,discountAmt,payDate,payAmt});
+    // 🔑 從 Excel 內訂單日期自動推算區間（避免覆蓋既有的其他區間對帳單）
+    const allDates=orders.map(o=>normDate(o.pickTime)).filter(Boolean).sort();
+    let df,dt;
+    if(allDates.length){
+      df=allDates[0];dt=allDates[allDates.length-1];
+    }else{
+      // 沒訂單 → fallback 到 UI 的日期區間或當月
+      const ctx=getCurrentReconKey();
+      if(!ctx){notify('無法決定對帳單區間（Excel 無訂單、UI 也沒設區間）',true);inp.value='';return}
+      df=ctx.df;dt=ctx.dt;
+    }
+    const[year,month]=df.split('-').map(Number);
     const key=getReconRangeKey(df,dt,merchant);
     const recons=DB.get('recons',{});
-    recons[key]={year,month,merchant,df,dt,status:'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname};
+    const existing=recons[key];
+    if(existing){
+      if(existing.archivedAt){
+        notify(`❌ 區間 ${df} ~ ${dt} 的對帳單已封存於資料庫，請先取消封存`,true);
+        inp.value='';return;
+      }
+      if(!confirm(`已存在相同區間對帳單：${merchant} · ${df===dt?df:`${df} ~ ${dt}`}\n（${existing.orders?.length||0} 筆、狀態：${existing.status||'好糰對帳中'}）\n\n覆蓋嗎？`)){
+        inp.value='';return;
+      }
+    }
+    console.log('[importRecon] 解析完成',{orders:orders.length,df,dt,discountReason,discountAmt});
+    recons[key]={year,month,merchant,df,dt,status:'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname||CUR.phone||''};
     DB.set('recons',recons);
     console.log('[importRecon] 已寫入 DB key=',key,'orders=',orders.length);
-    searchRecon();notify(`✅ 已匯入 ${orders.length} 筆對帳資料（${df} ~ ${dt}）`);
+    searchRecon();
+    notify(`✅ 已匯入 ${orders.length} 筆對帳資料（${df===dt?df:`${df} ~ ${dt}`}）`);
   };
   reader.readAsArrayBuffer(f);inp.value='';
 }
