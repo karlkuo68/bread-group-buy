@@ -109,6 +109,18 @@ Firebase Realtime DB
   - 修正：`searchRecon` 最後若有日期區間 + 商家，自動連帶呼叫 `searchReconRange`（按「查詢」就會同時列出對帳紀錄 + 區間訂單）
   - 修正：`viewReconDetail` / `viewMerchantReconDetail` 的 rec.year/month/merchant 欄位若缺，改用 `parseReconKey(key)` 推回（避免顯示 undefined）
   - 修正：`regenerateReconFromBatches` 寫入 recon 時補上 `year/month/merchant` 欄位，日後新資料就完整
+- **商家詳細資料 + 自我編輯（2026-04-21）**
+  - 新資料結構：`DB.merchantsInfo` = `{[商家名]: {title, taxId, pickupAddr, contactName, contactPhone, contactEmail, bankName, bankBranch, bankAccount, accountHolder, passbookImage, passbookFileName, notes, updatedAt, updatedBy}}`
+  - 原本的 `merchants` 仍是名稱清單，不動
+  - 欄位：發票抬頭、統一編號（8 碼驗證）、取貨地點、聯絡人/電話/Email、銀行/分行/帳號/戶名、帳簿影像（圖片或 PDF，base64）、備註
+  - Helper：`getMerchantInfo` / `saveMerchantInfo` / `canEditMerchant` / `hasMerchantProfile`
+  - 編輯 Modal：`editMerchantInfo(name)` 打開大表單，含帳簿上傳（5MB 限制）
+  - 權限：admin/owner 可編任何商家；merchant 只能編自己（CUR.businessName）
+  - UI 入口：
+    - 設定頁商家管理列表每列加 ✏️ 編輯 + ✓已填／⚠️未填 tag
+    - 訂單頁頂部給 merchant 專屬「🏪 我的商家資料」卡片，顯示已填欄位與編輯按鈕；未填會跳黃底警示
+  - 帳簿預覽：圖片直接顯示縮圖；PDF 顯示 📄 圖示與檔名
+  - Firebase 同步：DB.set('merchantsInfo', ...) 即時寫雲端
 - **對帳 key 改為區間制（2026-04-21，Ken 要 B 方案）**
   - 舊設計：同商家同月份只有一筆對帳單，重算會覆蓋
   - 新設計：每個日期區間獨立一筆，同月可有「上半月」「下半月」「整月」「任意區間」多筆並存
@@ -200,6 +212,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+（下個 commit）feat(merchant): 商家詳細資料 + 自我編輯（抬頭/統編/取貨/聯絡/撥款/帳簿）（2026-04-21）
 494efe6 refactor(recon): 對帳 key 改為區間制，同商家可多筆（2026-04-21）
 eba0d08 fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
 72e785d feat(users): 帳號管理擴充（上限 3 / 篩選 / 改暱稱改密碼 / 鎖定解鎖 / 刪除 confirm）（2026-04-21）

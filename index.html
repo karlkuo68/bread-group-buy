@@ -273,6 +273,8 @@ tbody td{padding:8px 11px;vertical-align:top}
 
   <!-- 訂單查詢 -->
   <div class="page" id="page-orders">
+    <!-- 商家自己的資料摘要（只給 merchant 看） -->
+    <div class="card hidden" id="merchantSelfCard" style="background:var(--light);border:1.5px solid var(--warm)"></div>
     <div class="card">
       <div class="card-title">🔍 訂單查詢</div>
       <div class="search-bar">
@@ -550,6 +552,7 @@ function enterApp(){
   el('tab-settings').classList.toggle('hidden',isMerchant);
   if(isMerchant){switchTab('orders')}
   loadSettings();renderUsers();refreshMerchantSelect();populateNewBizSelect();showAllBatches();
+  renderMerchantSelfCard();
   if(isAdmin(CUR.role))checkAutoBackup();
 }
 function doLogout(){localStorage.removeItem('bread_session');CUR=null;el('mainApp').classList.add('hidden');el('loginScreen').classList.remove('hidden');showLogin();el('loginUser').value='';el('loginPass').value=''}
@@ -811,9 +814,155 @@ function showImportPreview(){renderTable(G.items,el('previewTable'))}
 
 // ═══ MERCHANT MANAGEMENT ═══
 function getMerchants(){return DB.get('merchants',[])}
+// 商家詳細資料（抬頭/統編/取貨/聯絡/撥款/帳簿）— 以商家名稱為 key
+function getMerchantInfo(name){
+  const info=DB.get('merchantsInfo',{})||{};
+  const defaults={
+    name,title:'',taxId:'',pickupAddr:'',
+    contactName:'',contactPhone:'',contactEmail:'',
+    bankName:'',bankBranch:'',bankAccount:'',accountHolder:'',
+    passbookImage:'',passbookFileName:'',notes:'',
+    updatedAt:'',updatedBy:''
+  };
+  return{...defaults,...(info[name]||{}),name};
+}
+function saveMerchantInfo(name,data){
+  const info=DB.get('merchantsInfo',{})||{};
+  info[name]={...(info[name]||{}),...data,name,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR?.nickname||CUR?.phone||''};
+  DB.set('merchantsInfo',info);
+}
+function canEditMerchant(name){
+  if(!CUR)return false;
+  if(isAdmin(CUR.role))return true;
+  if(CUR.role==='merchant'&&CUR.businessName===name)return true;
+  return false;
+}
+function hasMerchantProfile(name){
+  const i=getMerchantInfo(name);
+  return!!(i.title||i.taxId||i.pickupAddr||i.contactPhone||i.bankAccount);
+}
 function renderMerchants(){
   const list=getMerchants();
-  el('merchantList').innerHTML=!list.length?'<div style="font-size:12px;color:var(--muted);padding:6px 0">尚未新增商家</div>':list.map((name,i)=>`<div class="rule-item"><span>🏪</span><strong>${name}</strong><button class="rule-del" onclick="delMerchant(${i})">✕</button></div>`).join('');
+  if(!list.length){el('merchantList').innerHTML='<div style="font-size:12px;color:var(--muted);padding:6px 0">尚未新增商家</div>';return}
+  el('merchantList').innerHTML=list.map((name,i)=>{
+    const ok=hasMerchantProfile(name);
+    const tag=ok?`<span class="hi-tag" style="background:var(--green);color:#fff;font-size:10px">✓ 已填</span>`:`<span class="hi-tag" style="background:#fdf4e3;color:var(--bread);font-size:10px">⚠️ 未填</span>`;
+    return`<div class="rule-item"><span>🏪</span><strong style="flex:1">${name}</strong>${tag}<button class="rule-del" style="color:var(--crust)" title="編輯商家資料" onclick="editMerchantInfo('${name.replace(/'/g,"\\'")}')">✏️</button><button class="rule-del" onclick="delMerchant(${i})">✕</button></div>`;
+  }).join('');
+}
+// ═══ 商家資料編輯 Modal ═══
+let _merchantPassbookPending=null;// {data, fileName}
+function editMerchantInfo(name){
+  if(!canEditMerchant(name)){notify('權限不足',true);return}
+  const info=getMerchantInfo(name);
+  _merchantPassbookPending={data:info.passbookImage||'',fileName:info.passbookFileName||''};
+  document.getElementById('merchantEditOverlay')?.remove();
+  const ov=document.createElement('div');
+  ov.id='merchantEditOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
+  const isOwn=CUR?.role==='merchant'&&CUR?.businessName===name;
+  const title=isOwn?`🏪 我的商家資料（${name}）`:`✏️ 編輯商家資料：${name}`;
+  const escName=name.replace(/'/g,"\\'");
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 26px;width:100%;max-width:680px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;font-size:18px;color:var(--crust);margin-bottom:4px">${title}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">資料會同步儲存到 Firebase，所有裝置即時可見</div>
+    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">📝 基本資料</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">商家名稱（系統識別碼，不可改）</label><input class="inp" value="${name}" disabled style="background:var(--warm);width:100%"></div>
+      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">發票抬頭</label><input class="inp" id="mi_title" value="${info.title||''}" placeholder="例：好櫃國際有限公司" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">統一編號</label><input class="inp" id="mi_taxId" value="${info.taxId||''}" maxlength="8" placeholder="8 位數字" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">聯絡電話</label><input class="inp" id="mi_contactPhone" value="${info.contactPhone||''}" style="width:100%"></div>
+      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">取貨地點</label><input class="inp" id="mi_pickupAddr" value="${info.pickupAddr||''}" placeholder="配送司機到這個地址取貨" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">聯絡人姓名</label><input class="inp" id="mi_contactName" value="${info.contactName||''}" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">聯絡 Email</label><input class="inp" id="mi_contactEmail" value="${info.contactEmail||''}" style="width:100%"></div>
+    </div>
+    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">💰 撥款資料</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div><label style="font-size:11px;color:var(--muted)">銀行</label><input class="inp" id="mi_bankName" value="${info.bankName||''}" placeholder="例：玉山銀行" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">分行</label><input class="inp" id="mi_bankBranch" value="${info.bankBranch||''}" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">帳號</label><input class="inp" id="mi_bankAccount" value="${info.bankAccount||''}" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">戶名</label><input class="inp" id="mi_accountHolder" value="${info.accountHolder||''}" style="width:100%"></div>
+      <div style="grid-column:1/-1">
+        <label style="font-size:11px;color:var(--muted)">存摺／帳簿影本（圖片或 PDF，供撥款核對）</label>
+        <div style="display:flex;gap:10px;align-items:flex-start;margin-top:4px;flex-wrap:wrap">
+          <div id="mi_passbookPreview" style="min-width:140px;min-height:90px;border:1.5px dashed #ccc;border-radius:6px;padding:8px;display:flex;align-items:center;justify-content:center;background:var(--light);font-size:11px;color:var(--muted)"></div>
+          <div><input type="file" id="mi_passbookFile" accept="image/*,application/pdf" style="font-size:12px" onchange="handleMerchantPassbook(this)"><div id="mi_passbookHint" style="margin-top:6px"></div></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-bottom:16px"><label style="font-size:11px;color:var(--muted)">備註</label><textarea class="inp" id="mi_notes" rows="2" style="width:100%;resize:vertical">${info.notes||''}</textarea></div>
+    ${info.updatedAt?`<div style="font-size:11px;color:var(--muted);margin-bottom:12px">最後更新：${info.updatedAt}${info.updatedBy?' by '+info.updatedBy:''}</div>`:''}
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="document.getElementById('merchantEditOverlay').remove();_merchantPassbookPending=null">取消</button>
+      <button class="btn btn-primary" onclick="saveMerchantEditForm('${escName}')">💾 儲存</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  renderMerchantPassbookPreview();
+}
+function renderMerchantPassbookPreview(){
+  const prev=el('mi_passbookPreview'),hint=el('mi_passbookHint');if(!prev)return;
+  const p=_merchantPassbookPending;
+  if(!p||!p.data){prev.innerHTML='尚未上傳';if(hint)hint.innerHTML='';return}
+  const isPdf=p.data.startsWith('data:application/pdf');
+  if(isPdf){prev.innerHTML=`<div style="text-align:center"><div style="font-size:28px">📄</div><div style="font-size:10px;color:var(--crust);margin-top:2px">${p.fileName||'PDF'}</div></div>`;}
+  else{prev.innerHTML=`<img src="${p.data}" style="max-width:180px;max-height:110px;border-radius:4px">`;}
+  if(hint)hint.innerHTML=`<button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="clearMerchantPassbook()">清除</button>`;
+}
+function handleMerchantPassbook(inp){
+  const f=inp.files[0];if(!f)return;
+  if(f.size>5*1024*1024){notify('檔案過大（上限 5MB）',true);inp.value='';return}
+  const r=new FileReader();
+  r.onload=e=>{_merchantPassbookPending={data:e.target.result,fileName:f.name};renderMerchantPassbookPreview()};
+  r.readAsDataURL(f);
+}
+function clearMerchantPassbook(){_merchantPassbookPending={data:'',fileName:''};const fi=el('mi_passbookFile');if(fi)fi.value='';renderMerchantPassbookPreview()}
+function saveMerchantEditForm(name){
+  if(!canEditMerchant(name)){notify('權限不足',true);return}
+  const taxId=el('mi_taxId').value.trim();
+  if(taxId&&!/^\d{8}$/.test(taxId)){notify('統編必須是 8 位數字',true);return}
+  const data={
+    title:el('mi_title').value.trim(),taxId,
+    pickupAddr:el('mi_pickupAddr').value.trim(),
+    contactName:el('mi_contactName').value.trim(),
+    contactPhone:el('mi_contactPhone').value.trim(),
+    contactEmail:el('mi_contactEmail').value.trim(),
+    bankName:el('mi_bankName').value.trim(),
+    bankBranch:el('mi_bankBranch').value.trim(),
+    bankAccount:el('mi_bankAccount').value.trim(),
+    accountHolder:el('mi_accountHolder').value.trim(),
+    passbookImage:_merchantPassbookPending?.data||'',
+    passbookFileName:_merchantPassbookPending?.fileName||'',
+    notes:el('mi_notes').value.trim()
+  };
+  saveMerchantInfo(name,data);
+  document.getElementById('merchantEditOverlay')?.remove();
+  _merchantPassbookPending=null;
+  notify(`✅ 已儲存「${name}」的商家資料`);
+  renderMerchants();renderMerchantSelfCard();
+}
+// 商家自己看：訂單頁最上方顯示「我的商家資料」摘要 + 編輯按鈕
+function renderMerchantSelfCard(){
+  const card=el('merchantSelfCard');if(!card)return;
+  if(CUR?.role!=='merchant'||!CUR.businessName){card.classList.add('hidden');return}
+  const info=getMerchantInfo(CUR.businessName);
+  const filled=hasMerchantProfile(CUR.businessName);
+  const escName=CUR.businessName.replace(/'/g,"\\'");
+  const warn=filled?'':`<div style="padding:8px 12px;background:#fdf4e3;border:1.5px dashed var(--bread);border-radius:6px;font-size:13px;color:var(--bread);margin-bottom:10px">⚠️ 您的商家資料尚未填寫完整，請先補齊（發票抬頭、取貨地點、撥款資料等）</div>`;
+  const rows=[
+    ['發票抬頭',info.title],['統一編號',info.taxId],
+    ['取貨地點',info.pickupAddr],['聯絡電話',info.contactPhone],
+    ['聯絡人',info.contactName],['Email',info.contactEmail],
+    ['銀行',[info.bankName,info.bankBranch].filter(Boolean).join(' ')],
+    ['帳號',info.bankAccount],['戶名',info.accountHolder],
+    ['帳簿',info.passbookImage?(info.passbookImage.startsWith('data:application/pdf')?'📄 已上傳 PDF':'🖼️ 已上傳圖片'):''],
+  ];
+  const filledRows=rows.filter(([_,v])=>v).map(([k,v])=>`<div style="display:flex;gap:8px;font-size:13px"><span style="color:var(--muted);min-width:70px">${k}</span><span style="color:var(--crust);font-weight:500">${v}</span></div>`).join('');
+  card.innerHTML=`<div class="card-title">🏪 我的商家資料 · ${CUR.businessName}</div>
+    ${warn}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;margin-bottom:10px">${filledRows||'<div style="font-size:12px;color:var(--muted)">尚未填寫任何資料</div>'}</div>
+    <div class="btn-row" style="margin-top:0"><button class="btn btn-primary btn-sm" onclick="editMerchantInfo('${escName}')">✏️ 編輯商家資料</button></div>`;
+  card.classList.remove('hidden');
 }
 function addMerchant(){
   const name=el('newMerchantName').value.trim();
