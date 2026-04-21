@@ -1906,8 +1906,27 @@ function exportReconRangeExcel(){
   XLSX.writeFile(wb,fn);
   notify('✅ 區間 Excel 已匯出');
 }
+// 舊 key 格式（整月對帳，相容保留）：recon_YYYY_M_商家
 function getReconKey(year,month,merchant){return`recon_${year}_${month}_${merchant}`}
-// 從日期區間推算「目前操作中的對帳月份」。優先順序：reconDateFrom > reconDateTo > 今日
+// 新 key 格式（區間對帳，2026-04-21 改）：recon_YYYY-MM-DD_YYYY-MM-DD_商家
+function getReconRangeKey(df,dt,merchant){return`recon_${df}_${dt}_${merchant}`}
+// 從 UI 推算目前要操作的 recon key（支援任意區間，每個區間獨立）
+// 有設日期區間 → 用該區間；沒設 → 用今天所在月份 1 日到月底
+function getCurrentReconKey(){
+  const merchant=el('reconMerchant')?.value||'';
+  if(!merchant)return null;
+  const dfRaw=el('reconDateFrom')?.value||'',dtRaw=el('reconDateTo')?.value||'';
+  let df,dt;
+  if(dfRaw||dtRaw){df=dfRaw||dtRaw;dt=dtRaw||dfRaw}
+  else{
+    const now=new Date();const y=now.getFullYear(),m=now.getMonth()+1;
+    const p=n=>String(n).padStart(2,'0');const lastDay=new Date(y,m,0).getDate();
+    df=`${y}-${p(m)}-01`;dt=`${y}-${p(m)}-${p(lastDay)}`;
+  }
+  if(df>dt)return null;
+  return{key:getReconRangeKey(df,dt,merchant),df,dt,merchant};
+}
+// 舊的：從 UI 推算 {year,month}（給上半月/下半月快捷鈕等還在用）
 function getReconCurYM(){
   const df=el('reconDateFrom')?.value||el('reconDateTo')?.value||'';
   if(df){
@@ -1917,52 +1936,58 @@ function getReconCurYM(){
   const now=new Date();
   return{year:now.getFullYear(),month:now.getMonth()+1};
 }
-// 解析 recons key：recon_2026_4_商家名 → {year,month,merchant}
+// 解析 recons key，支援新舊兩種格式
+// 回傳 {df, dt, merchant, year, month, isFullMonth, label}
 function parseReconKey(key){
-  const m=key.match(/^recon_(\d+)_(\d+)_(.+)$/);
-  if(!m)return null;
-  return{year:+m[1],month:+m[2],merchant:m[3]};
+  // 新格式：recon_YYYY-MM-DD_YYYY-MM-DD_merchant
+  const mNew=key.match(/^recon_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})_(.+)$/);
+  if(mNew){
+    const df=mNew[1],dt=mNew[2],merchant=mNew[3];
+    const[y,m]=df.split('-').map(Number);
+    const p=n=>String(n).padStart(2,'0');const lastDay=new Date(y,m,0).getDate();
+    const dtFull=`${y}-${p(m)}-${p(lastDay)}`;
+    const isFullMonth=df.endsWith('-01')&&dt===dtFull;
+    const label=isFullMonth?`${y}/${m} 整月`:(df===dt?`${df}（單日）`:`${df} ~ ${dt}`);
+    return{df,dt,merchant,year:y,month:m,isFullMonth,label};
+  }
+  // 舊格式：recon_YYYY_M_merchant（整月）
+  const mOld=key.match(/^recon_(\d+)_(\d+)_(.+)$/);
+  if(mOld){
+    const year=+mOld[1],month=+mOld[2],merchant=mOld[3];
+    const p=n=>String(n).padStart(2,'0');const lastDay=new Date(year,month,0).getDate();
+    const df=`${year}-${p(month)}-01`,dt=`${year}-${p(month)}-${p(lastDay)}`;
+    return{df,dt,merchant,year,month,isFullMonth:true,label:`${year}/${month} 整月（舊格式）`};
+  }
+  return null;
 }
 // ═══ 防呆：偵測對帳單 cache 與 batches 是否不一致（避免匯出時用到舊快照）═══
-function detectReconStale(cachedOrders,merchant,year,month){
+// 偵測對帳 cache 是否與 batches 不一致（改用 df/dt 區間）
+function detectReconStale(cachedOrders,merchant,df,dt){
   const batches=DB.get('batches',{});
   const batchOids=new Set();
-  for(const b of Object.values(batches)){
-    if(b.merchant!==merchant)continue;
-    for(const item of (b.items||[])){
-      const d=normDate(item.pickTime);if(!d)continue;
-      const[y,m]=d.split('-').map(Number);
-      if(y!==year||m!==month)continue;
-      batchOids.add(item.oid);
-    }
-  }
-  const cachedOids=new Set((cachedOrders||[]).map(o=>o.oid));
-  const addedOids=[...batchOids].filter(o=>!cachedOids.has(o));
-  const removedOids=[...cachedOids].filter(o=>!batchOids.has(o));
-  // 也檢查金額是否變動（品項新增刪除會改金額）
-  const changedOids=[];
   const batchAmtByOid={};
   for(const b of Object.values(batches)){
     if(b.merchant!==merchant)continue;
     for(const item of (b.items||[])){
       const d=normDate(item.pickTime);if(!d)continue;
-      const[y,m]=d.split('-').map(Number);
-      if(y!==year||m!==month)continue;
+      if(d<df||d>dt)continue;
+      batchOids.add(item.oid);
       batchAmtByOid[item.oid]=(batchAmtByOid[item.oid]||0)+(item.subtotal||0);
     }
   }
+  const cachedOids=new Set((cachedOrders||[]).map(o=>o.oid));
+  const addedOids=[...batchOids].filter(o=>!cachedOids.has(o));
+  const removedOids=[...cachedOids].filter(o=>!batchOids.has(o));
+  const changedOids=[];
   for(const o of (cachedOrders||[])){
-    if(!batchOids.has(o.oid))continue;// 已在 removedOids 計算過
+    if(!batchOids.has(o.oid))continue;
     if(batchAmtByOid[o.oid]!==o.amount)changedOids.push(o.oid);
   }
-  return {
-    stale:addedOids.length>0||removedOids.length>0||changedOids.length>0,
-    addedOids,removedOids,changedOids
-  };
+  return{stale:addedOids.length>0||removedOids.length>0||changedOids.length>0,addedOids,removedOids,changedOids};
 }
-// 從 batches 重新產生對帳單；preserveMeta=true 會保留 metadata（調帳/匯款/狀態）
-function regenerateReconFromBatches(year,month,merchant,preserveMeta){
-  const key=getReconKey(year,month,merchant);
+// 從 batches 重新產生對帳單（區間制）；preserveMeta=true 會保留 metadata（匯款/狀態；調帳歸零）
+function regenerateReconFromBatches(df,dt,merchant,preserveMeta){
+  const key=getReconRangeKey(df,dt,merchant);
   const recons=DB.get('recons',{});
   const old=recons[key]||{};
   const batches=DB.get('batches',{});
@@ -1971,21 +1996,18 @@ function regenerateReconFromBatches(year,month,merchant,preserveMeta){
     if(b.merchant!==merchant)continue;
     for(const item of (b.items||[])){
       const d=normDate(item.pickTime);if(!d)continue;
-      const[y,m]=d.split('-').map(Number);
-      if(y!==year||m!==month)continue;
+      if(d<df||d>dt)continue;
       if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0,discount:0,base:0,fee:0,recv:0,result:''};
       byOid[item.oid].amount+=item.subtotal||0;
     }
   }
   const orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
   orders.forEach(o=>{o.base=o.amount;o.fee=Math.round(o.amount*0.17);o.recv=o.amount-o.fee});
-  // 保留 per-oid 手動調整（如果舊金額未變）
   if(preserveMeta&&old.orders){
     const oldByOid={};for(const o of old.orders)oldByOid[o.oid]=o;
     orders.forEach(o=>{
       const oo=oldByOid[o.oid];if(!oo)return;
       if(oo.result)o.result=oo.result;
-      // 只有當金額沒變時才沿用 discount/base/fee/recv 手動調整
       if(oo.amount===o.amount){
         if(oo.discount)o.discount=oo.discount;
         if(oo.base!=null)o.base=oo.base;
@@ -1994,31 +2016,32 @@ function regenerateReconFromBatches(year,month,merchant,preserveMeta){
       }
     });
   }
-  // 重算時：調帳歸零（訂單變動後調帳需重新評估，Ken 要求）；匯款/狀態保留
+  const[y,m]=df.split('-').map(Number);
   const newRec=preserveMeta?{
     ...old,orders,
-    year,month,merchant,
+    year:y,month:m,merchant,df,dt,
     status:old.status||'好糰對帳中',
     discountReason:'',
     discountAmt:0,
     payDate:old.payDate||'',
     payAmt:old.payAmt||0,
     rebuiltAt:new Date().toLocaleString('zh-TW')
-  }:{orders,year,month,merchant,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
+  }:{orders,year:y,month:m,merchant,df,dt,status:'好糰對帳中',discountReason:'',discountAmt:0,rebuiltAt:new Date().toLocaleString('zh-TW')};
   recons[key]=newRec;
   DB.set('recons',recons);
-  console.log('[regenerateRecon]',key,'orders=',orders.length,'preserveMeta=',preserveMeta);
+  console.log('[regenerateRecon]',key,'orders=',orders.length);
   return newRec;
 }
-// 管理者主動按「🔄 重算對帳單」時呼叫
+// 管理者主動按「🔄 重算對帳單」時呼叫（用當前 UI 的日期區間）
 function rebuildReconFromBatches(){
-  const{year,month}=getReconCurYM();
-  const merchant=el('reconMerchant').value;
-  if(!merchant){notify('請先選擇商家',true);return}
-  if(!confirm(`確定要用最新訂單重算「${merchant} ${year}年${month}月」對帳單？\n\n✅ 保留：匯款日期/金額、對帳狀態、每筆訂單的手動調整（金額未變時）\n⚠️ 歸零：調帳原因、調帳金額（訂單變動後需重新評估）\n🔄 重產：訂單清單（以 batches 為準）`))return;
-  const rec=regenerateReconFromBatches(year,month,merchant,true);
+  const ctx=getCurrentReconKey();
+  if(!ctx){notify('請先選擇商家',true);return}
+  const{df,dt,merchant}=ctx;
+  const label=(df===dt)?df:`${df} ~ ${dt}`;
+  if(!confirm(`確定要用最新訂單重算「${merchant} · ${label}」對帳單？\n\n✅ 保留：匯款日期/金額、對帳狀態、每筆訂單的手動調整（金額未變時）\n⚠️ 歸零：調帳原因、調帳金額（訂單變動後需重新評估）\n🔄 重產：訂單清單（以 batches 為準）`))return;
+  const rec=regenerateReconFromBatches(df,dt,merchant,true);
   if(!rec.orders.length){
-    notify('⚠️ 該月該商家在批次中無訂單，對帳單已清空',true);
+    notify('⚠️ 此區間無訂單，對帳單已清空',true);
   }else{
     const total=rec.orders.reduce((s,o)=>s+o.amount,0);
     notify(`✅ 已重算：${rec.orders.length} 筆訂單，總額 $${total.toLocaleString()}`);
@@ -2035,17 +2058,18 @@ function searchRecon(){
   }).filter(Boolean);
   if(merchant)entries=entries.filter(e=>e.merchant===merchant);
   if(statusF)entries=entries.filter(e=>(e.rec?.status||'好糰對帳中')===statusF);
-  entries.sort((a,b)=>(b.year-a.year)||(b.month-a.month)||a.merchant.localeCompare(b.merchant));
+  // 按起始日期降冪（新的在前），同日期則依商家名排序
+  entries.sort((a,b)=>(b.df||'').localeCompare(a.df||'')||a.merchant.localeCompare(b.merchant));
   const SC={'好糰對帳中':'#999','店家對帳中':'#e67e22','店家對帳完成':'#27ae60','發票已開立':'#2980b9'};
   let html='';
   for(const e of entries){
-    const{key,rec,year,month,merchant:m}=e;
+    const{key,rec,label,merchant:m}=e;
     const status=rec?.status||'好糰對帳中';
     const total=rec?.orders?.reduce((s,o)=>s+(o.amount||0),0)||0;
     const discAmt=rec?.discountAmt||0;
     const rebuilt=rec?.rebuiltAt?`<span class="hi-tag" style="background:#f0e6d2;color:var(--crust);font-size:10px">🔄 ${rec.rebuiltAt.slice(5,16)}</span>`:'';
     const discTag=discAmt?`<span class="hi-tag" style="background:#fdf4e3;color:var(--bread);font-size:10px">調帳 ${discAmt>0?'+':''}$${discAmt.toLocaleString()}</span>`:'';
-    html+=`<div class="history-item"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${year}/${month}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions">`;
+    html+=`<div class="history-item"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${label}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions">`;
     if(CUR?.role==='merchant'){
       if(status==='店家對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="openMerchantRecon('${key}')">開始對帳</button>`;
       if(rec&&(status==='店家對帳完成'||status==='發票已開立'))html+=`<button class="btn btn-blue btn-sm" onclick="viewMerchantReconDetail('${key}')">📋 查詢明細</button>`;
@@ -2067,12 +2091,11 @@ function searchRecon(){
   }else{
     el('reconRangeCard').classList.add('hidden');
   }
-  // 控制匯出按鈕列
+  // 控制匯出按鈕列（由目前 UI 區間決定 key）
   if(merchant&&isAdmin(CUR?.role)){
     el('reconActions').classList.remove('hidden');
-    const{year,month}=getReconCurYM();
-    const key=getReconKey(year,month,merchant);
-    const rec=recons[key];
+    const ctx=getCurrentReconKey();
+    const rec=ctx?recons[ctx.key]:null;
     el('btnReconSend').classList.toggle('hidden',!rec||rec.status!=='好糰對帳中');
     el('btnReconInvoice').classList.toggle('hidden',!rec||rec.status!=='店家對帳完成');
   }else if(!isAdmin(CUR?.role)){
@@ -2080,90 +2103,43 @@ function searchRecon(){
   }
 }
 function exportReconExcel(){
-  const{year,month}=getReconCurYM();
-  const merchant=el('reconMerchant').value;
-  if(!merchant){notify('請選擇商家',true);return}
-  // 日期區間（選填）— 若有設則以區間匯出，不用整月 cache
-  const dfRaw=el('reconDateFrom')?.value||'',dtRaw=el('reconDateTo')?.value||'';
-  const hasRange=!!(dfRaw||dtRaw);
-  const df=dfRaw||dtRaw,dt=dtRaw||dfRaw;
-  if(hasRange&&df>dt){notify('起始日期不能晚於結束日期',true);return}
-  const key=getReconKey(year,month,merchant);
+  const ctx=getCurrentReconKey();
+  if(!ctx){notify('請先選擇商家',true);return}
+  const{key,df,dt,merchant}=ctx;
+  const parsed=parseReconKey(key);const rangeLabel=parsed?.label||`${df} ~ ${dt}`;
   let recons=DB.get('recons',{});
   let existingRec=recons[key];
-  // 🛡️ 防呆：只有整月模式才做 cache 過期偵測（區間模式直接從 batches 重讀）
-  if(!hasRange && existingRec?.orders?.length){
-    const stale=detectReconStale(existingRec.orders,merchant,year,month);
+  // 🛡️ 防呆：cache 若存在且與 batches 不一致 → 提示重算
+  if(existingRec?.orders?.length){
+    const stale=detectReconStale(existingRec.orders,merchant,df,dt);
     if(stale.stale){
       const fmt=(arr,max=3)=>arr.length?('（'+arr.slice(0,max).join('、')+(arr.length>max?' 等':'')+'）'):'';
-      const msg=`⚠️ 偵測到訂單資料已變動，目前對帳單不是最新：\n\n`+
+      const msg=`⚠️ 偵測到訂單資料已變動，此區間對帳單不是最新：\n\n`+
         (stale.addedOids.length?`・新增 ${stale.addedOids.length} 筆${fmt(stale.addedOids)}\n`:'')+
         (stale.removedOids.length?`・刪除 ${stale.removedOids.length} 筆${fmt(stale.removedOids)}\n`:'')+
         (stale.changedOids.length?`・金額變動 ${stale.changedOids.length} 筆${fmt(stale.changedOids)}\n`:'')+
         `\n要用最新訂單重算對帳單再匯出嗎？\n\n✅ 是 = 重算（保留匯款/狀態；調帳歸零）← 建議\n❌ 否 = 用舊資料匯出`;
       if(confirm(msg)){
-        existingRec=regenerateReconFromBatches(year,month,merchant,true);
+        existingRec=regenerateReconFromBatches(df,dt,merchant,true);
         recons=DB.get('recons',{});
         notify('✅ 已依最新訂單重算（調帳已歸零），即將匯出');
       }
     }
   }
+  // 沒 cache 就自動建立一筆（從 batches 首次產生，不動 metadata）
+  if(!existingRec?.orders?.length){
+    existingRec=regenerateReconFromBatches(df,dt,merchant,false);
+    recons=DB.get('recons',{});
+  }
   const header=['取件日期','星期','訂單ID','主聯絡人','外送地址','商品總金額','好糰折扣','服務費計算基礎','服務費','應收','對帳結果 預設正確'];
   const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
   const rows=[header];
-  let orders=[];
-  if(hasRange){
-    // 區間模式：從 batches 依日期過濾（不用 cache，也不帶 metadata 的調帳/匯款）
-    const batches=DB.get('batches',{});
-    const byOid={};
-    for(const b of Object.values(batches)){
-      if(b.merchant!==merchant)continue;
-      for(const item of (b.items||[])){
-        const d=normDate(item.pickTime);if(!d)continue;
-        if(d<df||d>dt)continue;
-        if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0};
-        byOid[item.oid].amount+=item.subtotal||0;
-      }
-    }
-    orders=Object.values(byOid).sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
-    console.log('[exportRecon] 區間模式',df,'~',dt,'orders=',orders.length);
-    orders.forEach(o=>{
-      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
-      const base=o.amount;const fee=Math.round(base*0.17);const recv=base-fee;
-      rows.push([normDate(o.pickTime)||o.pickTime,wk,o.oid,o.buyer,o.addr,base,0,base,fee,recv,'']);
-    });
-  }else if(existingRec&&existingRec.orders&&existingRec.orders.length){
-    // 整月模式：使用 cache（已處理過期偵測）
-    orders=existingRec.orders;
-    console.log('[exportRecon] 使用已存在對帳資料 key=',key,'orders=',orders.length);
-    orders.forEach(o=>{
-      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
-      rows.push([o.pickTime||'',wk,o.oid,o.buyer,o.addr||'',o.amount,o.discount||0,o.base||o.amount,o.fee||0,o.recv||0,o.result||'']);
-    });
-  }else{
-    // 整月模式：從批次首次產生
-    const batches=DB.get('batches',{});
-    for(const b of Object.values(batches)){
-      if(b.merchant!==merchant)continue;
-      const byOid={};
-      for(const item of (b.items||[])){
-        const d=normDate(item.pickTime);if(!d)continue;
-        const[y,m]=d.split('-').map(Number);
-        if(y!==year||m!==month)continue;
-        if(!byOid[item.oid])byOid[item.oid]={oid:item.oid,buyer:item.buyer,addr:item.addr,pickTime:item.pickTime,amount:0};
-        byOid[item.oid].amount+=item.subtotal;
-      }
-      orders.push(...Object.values(byOid));
-    }
-    console.log('[exportRecon] 從批次重新產生 orders=',orders.length);
-    orders.sort((a,b)=>(normDate(a.pickTime)||'').localeCompare(normDate(b.pickTime)||''));
-    orders.forEach(o=>{
-      const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
-      const base=o.amount;const fee=Math.round(base*0.17);const recv=base-fee;
-      rows.push([normDate(o.pickTime)||o.pickTime,wk,o.oid,o.buyer,o.addr,base,0,base,fee,recv,'']);
-    });
-  }
-  if(!orders.length){notify(hasRange?'此區間無訂單資料':'該月無訂單資料',true);return}
+  const orders=existingRec.orders||[];
+  orders.forEach(o=>{
+    const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
+    rows.push([o.pickTime||'',wk,o.oid,o.buyer,o.addr||'',o.amount,o.discount||0,o.base||o.amount,o.fee||0,o.recv||0,o.result||'']);
+  });
+  if(!orders.length){notify('此區間無訂單資料',true);return}
   // 合計行
   const sumRow=['','','合計','','',0,0,0,0,0,''];
   for(let i=1;i<rows.length;i++){sumRow[5]+=rows[i][5]||0;sumRow[6]+=rows[i][6]||0;sumRow[7]+=rows[i][7]||0;sumRow[8]+=rows[i][8]||0;sumRow[9]+=rows[i][9]||0}
@@ -2197,8 +2173,10 @@ function exportReconExcel(){
   notify(`✅ 對帳單已匯出 ${modeDesc}`);
 }
 function importReconExcel(inp){
-  const{year,month}=getReconCurYM();
-  const merchant=el('reconMerchant').value;
+  const ctx=getCurrentReconKey();
+  if(!ctx){notify('請先選擇商家',true);inp.value='';return}
+  const{df,dt,merchant}=ctx;
+  const[year,month]=df.split('-').map(Number);
   if(!merchant){notify('請選擇商家',true);inp.value='';return}
   const f=inp.files[0];if(!f){return}
   const reader=new FileReader();
@@ -2224,20 +2202,19 @@ function importReconExcel(inp){
       if(rows[i][0]==='匯款金額') payAmt=+rows[i][1]||0;
     }
     console.log('[importRecon] 解析完成',{orders:orders.length,discountReason,discountAmt,payDate,payAmt});
-    const key=getReconKey(year,month,merchant);
+    const key=getReconRangeKey(df,dt,merchant);
     const recons=DB.get('recons',{});
-    recons[key]={year,month,merchant,status:'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname};
+    recons[key]={year,month,merchant,df,dt,status:'好糰對帳中',orders,discountReason,discountAmt,payDate,payAmt,updatedAt:new Date().toLocaleString('zh-TW'),updatedBy:CUR.nickname};
     DB.set('recons',recons);
-    console.log('[importRecon] 已寫入 DB key=',key,'orders=',orders.length,'discountAmt=',discountAmt,'payDate=',payDate,'payAmt=',payAmt);
-    searchRecon();notify(`✅ 已匯入 ${orders.length} 筆對帳資料`);
+    console.log('[importRecon] 已寫入 DB key=',key,'orders=',orders.length);
+    searchRecon();notify(`✅ 已匯入 ${orders.length} 筆對帳資料（${df} ~ ${dt}）`);
   };
   reader.readAsArrayBuffer(f);inp.value='';
 }
 function sendRecon(){
-  const{year,month}=getReconCurYM();
-  const merchant=el('reconMerchant').value;
-  if(!merchant){notify('請選擇商家',true);return}
-  const key=getReconKey(year,month,merchant);
+  const ctx=getCurrentReconKey();
+  if(!ctx){notify('請選擇商家',true);return}
+  const{key}=ctx;
   const recons=DB.get('recons',{});
   if(!recons[key]){notify('尚無對帳資料，請先匯出再匯入',true);return}
   recons[key].status='店家對帳中';
@@ -2248,10 +2225,9 @@ function sendRecon(){
 }
 function markInvoiced(key){
   if(!key){
-    const{year,month}=getReconCurYM();
-    const merchant=el('reconMerchant').value;
-    if(!merchant){notify('請選擇商家',true);return}
-    key=getReconKey(year,month,merchant);
+    const ctx=getCurrentReconKey();
+    if(!ctx){notify('請選擇商家',true);return}
+    key=ctx.key;
   }
   const recons=DB.get('recons',{});
   if(!recons[key]){notify('無對帳資料',true);return}
@@ -2262,10 +2238,10 @@ function markInvoiced(key){
 }
 function viewReconDetail(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
-  // 相容：舊資料/重算產生的 rec 可能沒存 year/month/merchant，從 key 推回
   const parsed=parseReconKey(key)||{};
-  const yy=rec.year||parsed.year||'—',mm=rec.month||parsed.month||'—',mt=rec.merchant||parsed.merchant||'—';
-  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px">${yy}年${mm}月 · ${mt} · 狀態：${rec.status||'好糰對帳中'}</div>`;
+  const mt=rec.merchant||parsed.merchant||'—';
+  const label=parsed.label||(rec.df&&rec.dt?`${rec.df} ~ ${rec.dt}`:`${rec.year||'—'}/${rec.month||'—'}`);
+  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px">${mt} · ${label} · 狀態：${rec.status||'好糰對帳中'}</div>`;
   html+=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th style="text-align:right">金額</th><th style="text-align:right">折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
   let tAmt=0,tDiscount=0,tFee=0,tRecv=0;
   rec.orders.forEach(o=>{
@@ -2298,8 +2274,9 @@ function viewMerchantReconDetail(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
   el('merchantReconCard').classList.remove('hidden');
   const parsed=parseReconKey(key)||{};
-  const yy=rec.year||parsed.year||'—',mm=rec.month||parsed.month||'—',mt=rec.merchant||parsed.merchant||'—';
-  el('merchantReconInfo').textContent=`${yy}年${mm}月 · ${mt} · 共 ${rec.orders.length} 筆 · 狀態：${rec.status||'好糰對帳中'}`;
+  const mt=rec.merchant||parsed.merchant||'—';
+  const label=parsed.label||(rec.df&&rec.dt?`${rec.df} ~ ${rec.dt}`:`${rec.year||'—'}/${rec.month||'—'}`);
+  el('merchantReconInfo').textContent=`${mt} · ${label} · 共 ${rec.orders.length} 筆 · 狀態：${rec.status||'好糰對帳中'}`;
   let tRecv=0,tFee=0,tAmt=0,tDiscount=0;
   let html=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th>地址</th><th style="text-align:right">金額</th><th style="text-align:right">好糰折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
   rec.orders.forEach(o=>{
@@ -2331,7 +2308,10 @@ function viewMerchantReconDetail(key){
 function openMerchantRecon(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
   el('merchantReconCard').classList.remove('hidden');
-  el('merchantReconInfo').textContent=`${rec.year}年${rec.month}月 · ${rec.merchant} · 共 ${rec.orders.length} 筆`;
+  const parsed=parseReconKey(key)||{};
+  const label=parsed.label||`${rec.year}/${rec.month}`;
+  const mt=rec.merchant||parsed.merchant||'';
+  el('merchantReconInfo').textContent=`${mt} · ${label} · 共 ${rec.orders.length} 筆`;
   let html=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th>地址</th><th style="text-align:right">金額</th><th style="text-align:right">好糰折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>結果</th></tr>`;
   rec.orders.forEach((o,i)=>{
     html+=`<tr style="border-bottom:1px solid #eee"><td style="padding:3px">${o.pickTime||''}</td><td>${o.oid}</td><td>${o.buyer}</td><td style="font-size:10px">${o.addr||''}</td><td style="text-align:right">$${o.amount.toLocaleString()}</td><td style="text-align:right;color:#e67e22">${o.discount?'$'+o.discount.toLocaleString():''}</td><td style="text-align:right">$${(o.fee||0).toLocaleString()}</td><td style="text-align:right">$${(o.recv||0).toLocaleString()}</td><td><select class="select-in" style="font-size:10px;width:70px" data-idx="${i}"><option value="正確">正確</option><option value="錯誤"${o.result==='錯誤'?' selected':''}>錯誤</option></select></td></tr>`;

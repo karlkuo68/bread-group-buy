@@ -109,6 +109,21 @@ Firebase Realtime DB
   - 修正：`searchRecon` 最後若有日期區間 + 商家，自動連帶呼叫 `searchReconRange`（按「查詢」就會同時列出對帳紀錄 + 區間訂單）
   - 修正：`viewReconDetail` / `viewMerchantReconDetail` 的 rec.year/month/merchant 欄位若缺，改用 `parseReconKey(key)` 推回（避免顯示 undefined）
   - 修正：`regenerateReconFromBatches` 寫入 recon 時補上 `year/month/merchant` 欄位，日後新資料就完整
+- **對帳 key 改為區間制（2026-04-21，Ken 要 B 方案）**
+  - 舊設計：同商家同月份只有一筆對帳單，重算會覆蓋
+  - 新設計：每個日期區間獨立一筆，同月可有「上半月」「下半月」「整月」「任意區間」多筆並存
+  - 新 key 格式：`recon_YYYY-MM-DD_YYYY-MM-DD_商家`
+  - 舊 key 格式：`recon_YYYY_M_商家`（parseReconKey 兼容解析為整月區間）
+  - 新 helper：
+    - `getReconRangeKey(df, dt, merchant)` 產生新 key
+    - `getCurrentReconKey()` 從 UI 推出當前操作的 key（有區間用區間；沒有用今月整月）
+    - `parseReconKey(key)` 支援新舊兩種格式，回傳 `{df, dt, merchant, year, month, isFullMonth, label}`
+  - 操作區別：
+    - 沒設日期區間 → 操作的是「今月整月」對帳單
+    - 有設日期區間 → 操作的是該區間專屬對帳單
+  - 所有 recon 函式都改用 getCurrentReconKey：exportReconExcel / importReconExcel / rebuildReconFromBatches / sendRecon / markInvoiced / regenerateReconFromBatches / detectReconStale
+  - searchRecon 按起始日期降冪排序，每筆顯示 label（「2026/4 整月」「2026-04-01 ~ 2026-04-15」等）
+  - viewReconDetail / viewMerchantReconDetail 改用 label 顯示
 - **清除舊訂單改 per-item + 同步清對帳紀錄（2026-04-21）**
   - 舊 bug：原邏輯看「整批的最晚取件日」，若批次含混合日期（如 4/8、4/15、4/22），永遠不符合清除條件 → 顯示沒資料
   - 修：`_scanCleanup(dateStr)` 逐筆檢查 pickTime < dateStr，該批次部分刪除（保留新訂單）
@@ -185,6 +200,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+（下個 commit）refactor(recon): 對帳 key 改為區間制，同商家可多筆（2026-04-21）
 eba0d08 fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
 72e785d feat(users): 帳號管理擴充（上限 3 / 篩選 / 改暱稱改密碼 / 鎖定解鎖 / 刪除 confirm）（2026-04-21）
 36fd6de cleanup+fix: 刪除無用設定（storeName、ipp）+ 對帳搜尋連動日期區間（2026-04-21）
