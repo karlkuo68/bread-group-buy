@@ -2372,6 +2372,7 @@ function rebuildReconFromBatches(){
 }
 function searchRecon(){
   const merchant=el('reconMerchant').value,statusF=el('reconStatus').value;
+  const dfRaw=el('reconDateFrom')?.value||'',dtRaw=el('reconDateTo')?.value||'';
   const recons=DB.get('recons',{});
   // 列出未封存的對帳紀錄（已封存的在「📚 資料庫查詢」顯示）
   let entries=Object.entries(recons).map(([key,rec])=>{
@@ -2380,6 +2381,11 @@ function searchRecon(){
   }).filter(Boolean).filter(e=>!e.rec?.archivedAt);
   if(merchant)entries=entries.filter(e=>e.merchant===merchant);
   if(statusF)entries=entries.filter(e=>(e.rec?.status||'好糰對帳中')===statusF);
+  // 日期區間篩選：對帳單區間必須完全落在篩選區間內（df >= dfUse 且 dt <= dtUse）
+  if(dfRaw||dtRaw){
+    const dfUse=dfRaw||dtRaw,dtUse=dtRaw||dfRaw;
+    entries=entries.filter(e=>(e.df||'')>=dfUse&&(e.dt||'')<=dtUse);
+  }
   // 按起始日期降冪（新的在前），同日期則依商家名排序
   entries.sort((a,b)=>(b.df||'').localeCompare(a.df||'')||a.merchant.localeCompare(b.merchant));
   const SC={'好糰對帳中':'#999','店家對帳中':'#e67e22','店家對帳完成':'#27ae60','發票已開立':'#2980b9'};
@@ -2412,7 +2418,15 @@ function searchRecon(){
     html+=`</div></div>`;
   }
   if(!entries.length){
-    const hint=merchant?`「${merchant}」尚無對帳紀錄。選好商家後，用下方「匯出對帳單 Excel」或「🔄 重算對帳單」即可建立當月紀錄。`:'目前沒有任何對帳紀錄。請先選擇商家並用「匯出對帳單 Excel」建立。';
+    const hasDate=dfRaw||dtRaw;
+    let hint;
+    if(hasDate){
+      const dfUse=dfRaw||dtRaw,dtUse=dtRaw||dfRaw;
+      const rangeLabel=dfUse===dtUse?dfUse:`${dfUse} ~ ${dtUse}`;
+      hint=merchant?`「${merchant}」在 ${rangeLabel} 區間內尚無對帳單。可按上方「🧾 生成對帳單」建立。`:`${rangeLabel} 區間內尚無對帳單。請先選商家再生成。`;
+    }else{
+      hint=merchant?`「${merchant}」尚無對帳紀錄。選好商家後，用下方「匯出對帳單 Excel」或「🔄 重算對帳單」即可建立當月紀錄。`:'目前沒有任何對帳紀錄。請先選擇商家並用「🧾 生成對帳單」建立。';
+    }
     html=`<div class="empty-state"><div class="empty-icon">💰</div><div style="max-width:420px;margin:0 auto;line-height:1.6;color:var(--muted)">${hint}</div></div>`;
   }
   el('reconList').innerHTML=html;
