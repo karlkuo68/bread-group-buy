@@ -109,6 +109,27 @@ Firebase Realtime DB
   - 修正：`searchRecon` 最後若有日期區間 + 商家，自動連帶呼叫 `searchReconRange`（按「查詢」就會同時列出對帳紀錄 + 區間訂單）
   - 修正：`viewReconDetail` / `viewMerchantReconDetail` 的 rec.year/month/merchant 欄位若缺，改用 `parseReconKey(key)` 推回（避免顯示 undefined）
   - 修正：`regenerateReconFromBatches` 寫入 recon 時補上 `year/month/merchant` 欄位，日後新資料就完整
+- **清除舊訂單改 per-item + 同步清對帳紀錄（2026-04-21）**
+  - 舊 bug：原邏輯看「整批的最晚取件日」，若批次含混合日期（如 4/8、4/15、4/22），永遠不符合清除條件 → 顯示沒資料
+  - 修：`_scanCleanup(dateStr)` 逐筆檢查 pickTime < dateStr，該批次部分刪除（保留新訂單）
+  - 整批都舊 → 刪整批；部分舊 → 更新 items 與 oids
+  - 同時清除對帳紀錄：年月 < 清除年月的所有 recons
+  - 預覽顯示：X 筆訂單品項、Y 整批刪、Z 部分刪、N 筆對帳紀錄（列出商家+年月）
+  - 備份 Excel 含：訂單品項 sheet + 對帳紀錄 sheet
+- **備份改為行政可讀 Excel（2026-04-21）**
+  - 原本只有 JSON 備份（使用者看不懂），改為主要產出 Excel
+  - 新增 `exportAllExcel()`：產出 8 個 sheet
+    - 訂單明細（每筆品項一列）
+    - 訂單批次總覽（每批統計）
+    - 對帳紀錄（每月每商家一列）
+    - 對帳訂單明細（對帳裡每筆訂單）
+    - 商家清單（含 n/3 使用量）
+    - 帳號清單（不含密碼，含鎖定/核可狀態）
+    - 已接受訂單
+    - 系統設定與摘要
+  - 按鈕排列：`⬇️ 備份資料（Excel）` | `⬇️ 進階備份（JSON）` | `⬆️ 還原備份（JSON）`
+  - 還原仍用 JSON（因為 Excel 還原需要解析結構，風險大）
+  - JSON 備份同步擴充 v3→v4，多存 recons/merchants/acceptance
 - **帳號管理擴充（2026-04-21）**
   - 商家帳號上限：每個商家最多 3 個帳號（含待核可）；`MERCHANT_USER_LIMIT=3` 常數
   - `doRegister` / `addUser` / `approveUser` 三處都會檢查；超過會擋下並提示
@@ -164,6 +185,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
+（下個 commit）fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
 72e785d feat(users): 帳號管理擴充（上限 3 / 篩選 / 改暱稱改密碼 / 鎖定解鎖 / 刪除 confirm）（2026-04-21）
 36fd6de cleanup+fix: 刪除無用設定（storeName、ipp）+ 對帳搜尋連動日期區間（2026-04-21）
 6b4f4c2 refactor(recon): 移除年/月下拉，改從日期區間推算；對帳清單列出全部（2026-04-21）
@@ -219,6 +241,9 @@ git push origin main
 2. **commit 訊息格式**：`fix:`、`feat:`、`feat(sticker):` 等 conventional commit 前綴
 3. 修完記得 `git push origin main` 才會上線
 4. 備份檔（`*.bak.*`）不要 commit，保持版控只有 `index.html`
+5. **.bak 檔案輪替**：只保留最近 2 份，修改前備份後順便清除更舊的（Ken 2026-04-21 要求）
+   - 指令：`ls -t index.html.bak.* | tail -n +3 | xargs rm -v`
+   - 歷史版本要回溯用 git，不靠 .bak 檔
 
 ---
 

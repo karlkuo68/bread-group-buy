@@ -388,9 +388,14 @@ tbody td{padding:8px 11px;vertical-align:top}
     </div>
     <div class="card">
       <div class="card-title">💾 資料管理</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+        備份會產出 Excel 檔（多個工作表：訂單、對帳、商家、帳號、設定），方便行政核對。<br>
+        進階備份（JSON）保留原始資料結構，只在需要完整還原時使用。
+      </div>
       <div class="btn-row" style="margin-top:0">
-        <button class="btn btn-ghost btn-sm" onclick="exportAll()">⬇️ 備份所有資料</button>
-        <button class="btn btn-ghost btn-sm" onclick="el('restoreIn').click()">⬆️ 還原備份</button>
+        <button class="btn btn-primary btn-sm" onclick="exportAllExcel()">⬇️ 備份資料（Excel）</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportAll()">⬇️ 進階備份（JSON）</button>
+        <button class="btn btn-ghost btn-sm" onclick="el('restoreIn').click()">⬆️ 還原備份（JSON）</button>
         <input type="file" id="restoreIn" accept=".json" class="hidden" onchange="restoreData(this)">
       </div>
     </div>
@@ -1479,11 +1484,154 @@ function dlPackExcel(items){
 }
 
 // ═══ BACKUP ═══
-function exportAll(){
-  const data={version:3,exportedAt:new Date().toISOString(),settings:DB.get('settings',{}),batches:DB.get('batches',{}),users:(DB.get('users',[])).map(u=>({phone:u.phone,role:u.role,password:u.password,nickname:u.nickname,businessName:u.businessName}))};
-  dlBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`麵包團購備份_${new Date().toLocaleDateString('zh-TW').replace(/\//g,'')}.json`);notify('✅ 備份完成');
+// 行政可讀的 Excel 備份（多 sheet：訂單/對帳/商家/帳號/設定/已接受）
+function exportAllExcel(){
+  try{
+    const wb=XLSX.utils.book_new();
+    const batches=DB.get('batches',{});
+    const recons=DB.get('recons',{});
+    const users=DB.get('users',[])||[];
+    const merchants=DB.get('merchants',[])||[];
+    const acceptance=DB.get('acceptance',{})||{};
+    const settings=DB.get('settings',{});
+    // Sheet 1: 訂單明細（展平所有 batches 的 items）
+    const orderRows=[];
+    for(const b of Object.values(batches)){
+      for(const item of (b.items||[])){
+        orderRows.push({
+          批次ID:b.id||'',商家:b.merchant||'',匯入時間:b.savedAt||'',匯入人:b.savedBy||'',檔案名稱:b.fileName||'',
+          訂單ID:item.oid,訂購人:item.buyer,取件人:item.person,地址:item.addr,取件時間:item.pickTime,備註:item.note,
+          品項:item.itemName,單價:item.price,數量:item.qty,小計:item.subtotal
+        });
+      }
+    }
+    if(orderRows.length){
+      const ws=XLSX.utils.json_to_sheet(orderRows);
+      ws['!cols']=[{wch:14},{wch:10},{wch:18},{wch:10},{wch:18},{wch:14},{wch:10},{wch:10},{wch:18},{wch:18},{wch:18},{wch:18},{wch:8},{wch:6},{wch:10}];
+      XLSX.utils.book_append_sheet(wb,ws,'訂單明細');
+    }
+    // Sheet 2: 訂單批次總覽
+    const batchRows=[['批次ID','商家','匯入時間','匯入人','檔案名稱','訂單數','品項數','總數量','總金額']];
+    for(const b of Object.values(batches)){
+      const items=b.items||[];
+      const tq=items.reduce((s,r)=>s+(r.qty||0),0);
+      const ta=items.reduce((s,r)=>s+(r.subtotal||0),0);
+      batchRows.push([b.id||'',b.merchant||'',b.savedAt||'',b.savedBy||'',b.fileName||'',(b.oids||[]).length,items.length,tq,ta]);
+    }
+    if(batchRows.length>1){
+      const ws=XLSX.utils.aoa_to_sheet(batchRows);
+      ws['!cols']=[{wch:18},{wch:10},{wch:18},{wch:10},{wch:18},{wch:8},{wch:8},{wch:10},{wch:12}];
+      XLSX.utils.book_append_sheet(wb,ws,'訂單批次總覽');
+    }
+    // Sheet 3: 對帳紀錄
+    const reconRows=[['商家','年/月','狀態','訂單數','訂單總額','服務費','應收','調帳原因','調帳金額','匯款日期','匯款金額','重算時間']];
+    for(const[key,rec]of Object.entries(recons)){
+      const p=(typeof parseReconKey==='function')?parseReconKey(key):null;
+      const yy=rec.year||p?.year||'',mm=rec.month||p?.month||'',mt=rec.merchant||p?.merchant||'';
+      const orders=rec.orders||[];
+      const tAmt=orders.reduce((s,o)=>s+(o.amount||0),0);
+      const tFee=orders.reduce((s,o)=>s+(o.fee||0),0);
+      const tRecv=orders.reduce((s,o)=>s+(o.recv||0),0);
+      reconRows.push([mt,`${yy}/${mm}`,rec.status||'',orders.length,tAmt,tFee,tRecv,rec.discountReason||'',rec.discountAmt||0,rec.payDate||'',rec.payAmt||0,rec.rebuiltAt||'']);
+    }
+    if(reconRows.length>1){
+      const ws=XLSX.utils.aoa_to_sheet(reconRows);
+      ws['!cols']=[{wch:10},{wch:10},{wch:12},{wch:8},{wch:12},{wch:10},{wch:12},{wch:18},{wch:10},{wch:12},{wch:12},{wch:18}];
+      XLSX.utils.book_append_sheet(wb,ws,'對帳紀錄');
+    }
+    // Sheet 4: 對帳訂單明細（所有對帳月份的每筆訂單）
+    const reconOrderRows=[['商家','年/月','取件日期','訂單ID','訂購人','地址','金額','折扣','服務費','應收','對帳結果']];
+    for(const[key,rec]of Object.entries(recons)){
+      const p=(typeof parseReconKey==='function')?parseReconKey(key):null;
+      const mt=rec.merchant||p?.merchant||'',ym=`${rec.year||p?.year||''}/${rec.month||p?.month||''}`;
+      for(const o of (rec.orders||[])){
+        reconOrderRows.push([mt,ym,o.pickTime||'',o.oid,o.buyer||'',o.addr||'',o.amount||0,o.discount||0,o.fee||0,o.recv||0,o.result||'']);
+      }
+    }
+    if(reconOrderRows.length>1){
+      const ws=XLSX.utils.aoa_to_sheet(reconOrderRows);
+      ws['!cols']=[{wch:10},{wch:10},{wch:18},{wch:14},{wch:10},{wch:18},{wch:10},{wch:8},{wch:10},{wch:10},{wch:10}];
+      XLSX.utils.book_append_sheet(wb,ws,'對帳訂單明細');
+    }
+    // Sheet 5: 商家清單
+    const merchantRows=[['商家名稱','帳號數','上限']];
+    for(const m of merchants){
+      const cnt=users.filter(u=>u.role==='merchant'&&u.businessName===m).length;
+      merchantRows.push([m,cnt,3]);
+    }
+    if(merchantRows.length>1){
+      const ws=XLSX.utils.aoa_to_sheet(merchantRows);
+      ws['!cols']=[{wch:20},{wch:8},{wch:8}];
+      XLSX.utils.book_append_sheet(wb,ws,'商家清單');
+    }
+    // Sheet 6: 帳號清單（不包含密碼）
+    const userRows=[['電話（帳號）','暱稱','角色','所屬商家','核可狀態','鎖定狀態','建立時間','鎖定時間','鎖定人']];
+    const RLmap={owner:'負責人',admin:'管理者',cs:'客服人員',merchant:'商家'};
+    for(const u of users){
+      userRows.push([u.phone,u.nickname||'',RLmap[u.role]||u.role,u.businessName||'',u.approved===false?'待核可':'已核可',u.locked?'已鎖定':'',u.createdAt||'',u.lockedAt||'',u.lockedBy||'']);
+    }
+    const wsU=XLSX.utils.aoa_to_sheet(userRows);
+    wsU['!cols']=[{wch:14},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:18},{wch:18},{wch:10}];
+    XLSX.utils.book_append_sheet(wb,wsU,'帳號清單');
+    // Sheet 7: 商家已接受訂單紀錄
+    const accRows=[['訂單ID','接受時間','接受人','商家','角色','電話']];
+    const RLmap2={owner:'負責人',admin:'管理者',cs:'客服人員',merchant:'商家'};
+    for(const[oid,a]of Object.entries(acceptance)){
+      accRows.push([oid,a.at||'',a.by||'',a.byBusiness||'',RLmap2[a.byRole]||a.byRole||'',a.byPhone||'']);
+    }
+    if(accRows.length>1){
+      const ws=XLSX.utils.aoa_to_sheet(accRows);
+      ws['!cols']=[{wch:14},{wch:18},{wch:10},{wch:12},{wch:10},{wch:14}];
+      XLSX.utils.book_append_sheet(wb,ws,'已接受訂單');
+    }
+    // Sheet 8: 系統設定
+    const setRows=[['項目','值']];
+    setRows.push(['每袋最多麵包數量',settings.bagCap||G.bagCap||8]);
+    setRows.push(['包裝組合規則',(settings.rules||G.rules||[]).map(r=>`${r.label||'(無標籤)'}：${(r.keywords||[]).join('、')}`).join(' ｜ ')||'（無）']);
+    setRows.push(['商家總數',merchants.length]);
+    setRows.push(['帳號總數',users.length]);
+    setRows.push(['訂單批次數',Object.keys(batches).length]);
+    setRows.push(['對帳紀錄數',Object.keys(recons).length]);
+    setRows.push(['匯出時間',new Date().toLocaleString('zh-TW')]);
+    setRows.push(['匯出人',CUR?.nickname||CUR?.phone||'']);
+    const wsS=XLSX.utils.aoa_to_sheet(setRows);
+    wsS['!cols']=[{wch:20},{wch:60}];
+    XLSX.utils.book_append_sheet(wb,wsS,'系統設定與摘要');
+    const dateStr=new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb,`麵包團購_資料備份_${dateStr}.xlsx`);
+    notify('✅ Excel 備份完成（含訂單、對帳、商家、帳號等）');
+  }catch(e){notify('備份失敗：'+e.message,true);console.error(e)}
 }
-function restoreData(inp){const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.settings)DB.set('settings',d.settings);if(d.batches)DB.set('batches',d.batches);if(d.users&&isAdmin(CUR?.role))DB.set('users',d.users);loadSettings();renderUsers();showAllBatches();notify('✅ 已還原')}catch{notify('格式錯誤',true)}};r.readAsText(inp.files[0]);inp.value=''}
+// JSON 備份（技術用，可用於完整還原）
+function exportAll(){
+  const data={version:4,exportedAt:new Date().toISOString(),
+    settings:DB.get('settings',{}),
+    batches:DB.get('batches',{}),
+    recons:DB.get('recons',{}),
+    merchants:DB.get('merchants',[]),
+    acceptance:DB.get('acceptance',{}),
+    users:(DB.get('users',[])).map(u=>({phone:u.phone,role:u.role,password:u.password,nickname:u.nickname,businessName:u.businessName,approved:u.approved,locked:u.locked,lockedAt:u.lockedAt,lockedBy:u.lockedBy,createdAt:u.createdAt}))
+  };
+  dlBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`麵包團購_完整備份_${new Date().toISOString().slice(0,10)}.json`);
+  notify('✅ JSON 完整備份完成');
+}
+function restoreData(inp){
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const d=JSON.parse(e.target.result);
+      if(d.settings)DB.set('settings',d.settings);
+      if(d.batches)DB.set('batches',d.batches);
+      if(d.recons)DB.set('recons',d.recons);
+      if(d.merchants)DB.set('merchants',d.merchants);
+      if(d.acceptance)DB.set('acceptance',d.acceptance);
+      if(d.users&&isAdmin(CUR?.role))DB.set('users',d.users);
+      loadSettings();renderUsers();showAllBatches();
+      notify('✅ 已還原完整備份');
+    }catch(err){notify('格式錯誤：'+err.message,true);console.error(err)}
+  };
+  r.readAsText(inp.files[0]);inp.value='';
+}
 
 // ═══ AUTO BACKUP ═══
 function checkAutoBackup(){
@@ -1502,27 +1650,53 @@ function checkAutoBackup(){
   }
 }
 
-// ═══ CLEANUP (清除舊訂單) ═══
+// ═══ CLEANUP (清除此日期之前的訂單與對帳單) ═══
 let _cleanupBackupDownloaded=false;
+// 掃描所有 batches 找出 pickTime < dateStr 的品項（逐筆判斷，支援混合日期的批次）
+function _scanCleanup(dateStr){
+  const batches=DB.get('batches',{});
+  const toRemove=[];// [{batchId, batch, removedItems:[], keptItems:[]}]
+  for(const[id,b]of Object.entries(batches)){
+    const keep=[],remove=[];
+    for(const item of (b.items||[])){
+      const d=normDate(item.pickTime);
+      if(d&&d<dateStr)remove.push(item);else keep.push(item);
+    }
+    if(remove.length)toRemove.push({id,batch:b,removedItems:remove,keptItems:keep});
+  }
+  // 對帳紀錄：以「年月」為單位，只要整個月份早於 dateStr 的月份就算舊資料
+  const recons=DB.get('recons',{});
+  const oldRecons=[];
+  const cy=+dateStr.slice(0,4),cm=+dateStr.slice(5,7);
+  const cleanYm=cy*100+cm;
+  for(const[key,rec]of Object.entries(recons)){
+    const parsed=(typeof parseReconKey==='function')?parseReconKey(key):null;if(!parsed)continue;
+    if(parsed.year*100+parsed.month<cleanYm)oldRecons.push({key,rec,parsed});
+  }
+  return{toRemove,oldRecons};
+}
 function previewCleanup(){
   const dateStr=el('cleanupDate').value;
   if(!dateStr){notify('請選擇日期',true);return}
-  const batches=DB.get('batches',{});const toDelete=[];
-  for(const[id,b]of Object.entries(batches)){
-    const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);
-    const latest=dates.sort().pop()||'';
-    if(latest&&latest<dateStr)toDelete.push({id,batch:b,latestDate:latest});
+  const{toRemove,oldRecons}=_scanCleanup(dateStr);
+  const totalItems=toRemove.reduce((s,t)=>s+t.removedItems.length,0);
+  const totalQty=toRemove.reduce((s,t)=>s+t.removedItems.reduce((ss,r)=>ss+(r.qty||0),0),0);
+  const totalAmt=toRemove.reduce((s,t)=>s+t.removedItems.reduce((ss,r)=>ss+(r.subtotal||0),0),0);
+  const batchesFullyRemoved=toRemove.filter(t=>!t.keptItems.length).length;
+  const batchesPartial=toRemove.length-batchesFullyRemoved;
+  if(!totalItems&&!oldRecons.length){
+    notify(`✅ 沒有 ${dateStr} 之前的資料可清除`,true);
+    el('cleanupPreview').style.display='none';el('confirmCleanBtn').style.display='none';return;
   }
-  if(!toDelete.length){notify('沒有符合條件的舊訂單',true);el('cleanupPreview').style.display='none';el('confirmCleanBtn').style.display='none';return}
-  const totalItems=toDelete.reduce((s,d)=>s+d.batch.items.length,0);
-  const totalQty=toDelete.reduce((s,d)=>s+d.batch.items.reduce((ss,r)=>ss+r.qty,0),0);
   _cleanupBackupDownloaded=false;
+  const reconList=oldRecons.map(r=>`${r.parsed.merchant} ${r.parsed.year}/${r.parsed.month}`).join('、');
   el('cleanupPreview').innerHTML=`
-    <div style="font-size:14px;font-weight:700;color:var(--red);margin-bottom:8px">⚠️ 將清除以下資料：</div>
+    <div style="font-size:14px;font-weight:700;color:var(--red);margin-bottom:8px">⚠️ 將清除 <strong>${dateStr}</strong> 之前的資料：</div>
     <div style="font-size:13px;line-height:2">
-      <div>• <strong>${toDelete.length}</strong> 個訂單批次</div>
-      <div>• <strong>${totalItems}</strong> 筆品項記錄（共 ${totalQty} 個麵包）</div>
-      <div>• 最晚取件日期在 <strong>${dateStr}</strong> 之前</div>
+      ${totalItems?`<div>• <strong>${totalItems}</strong> 筆訂單品項 / 共 <strong>${totalQty}</strong> 個麵包 / 金額 $${totalAmt.toLocaleString()}</div>`:''}
+      ${batchesFullyRemoved?`<div>• <strong>${batchesFullyRemoved}</strong> 個批次整批刪除</div>`:''}
+      ${batchesPartial?`<div>• <strong>${batchesPartial}</strong> 個批次部分刪除（新訂單保留）</div>`:''}
+      ${oldRecons.length?`<div>• <strong>${oldRecons.length}</strong> 筆對帳紀錄（${reconList}）</div>`:''}
     </div>
     <div style="margin-top:12px;padding:10px;background:#FEF3F3;border:1px solid var(--red);border-radius:6px;font-size:13px;color:var(--red);font-weight:600">
       ⚠️ 請先下載備份檔案，確認下載完成後再點擊「確認清除」
@@ -1535,31 +1709,70 @@ function previewCleanup(){
   el('cleanupPreview').scrollIntoView({behavior:'smooth'});
 }
 function downloadCleanupBackup(){
-  const dateStr=el('cleanupDate').value;const batches=DB.get('batches',{});
-  const toDelete=Object.entries(batches).filter(([id,b])=>{const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);const latest=dates.sort().pop()||'';return latest&&latest<dateStr});
-  if(!toDelete.length)return;
+  const dateStr=el('cleanupDate').value;
+  const{toRemove,oldRecons}=_scanCleanup(dateStr);
+  if(!toRemove.length&&!oldRecons.length)return;
   try{
-    const wb=XLSX.utils.book_new();const allItems=[];
-    for(const[id,b]of toDelete)for(const item of b.items)allItems.push({批次ID:id,商家:b.merchant||'',匯入時間:b.savedAt||'',檔案名稱:b.fileName||'',訂單ID:item.oid,訂購人:item.buyer,取件人:item.person,地址:item.addr,取件時間:item.pickTime,備註:item.note,品項:item.itemName,單價:item.price,數量:item.qty,小計:item.subtotal});
-    const ws=XLSX.utils.json_to_sheet(allItems);XLSX.utils.book_append_sheet(wb,ws,'清除前備份');
+    const wb=XLSX.utils.book_new();
+    // Sheet 1: 訂單品項（即將被刪除的）
+    const items=[];
+    for(const t of toRemove){
+      for(const item of t.removedItems){
+        items.push({批次ID:t.id,商家:t.batch.merchant||'',匯入時間:t.batch.savedAt||'',檔案:t.batch.fileName||'',訂單ID:item.oid,訂購人:item.buyer,取件人:item.person,地址:item.addr,取件時間:item.pickTime,備註:item.note,品項:item.itemName,單價:item.price,數量:item.qty,小計:item.subtotal});
+      }
+    }
+    if(items.length){
+      const ws=XLSX.utils.json_to_sheet(items);
+      XLSX.utils.book_append_sheet(wb,ws,'訂單品項');
+    }
+    // Sheet 2: 對帳紀錄
+    if(oldRecons.length){
+      const rows=[['商家','年/月','狀態','訂單數','總額','調帳原因','調帳金額','匯款日期','匯款金額']];
+      for(const r of oldRecons){
+        const total=r.rec.orders?.reduce((s,o)=>s+(o.amount||0),0)||0;
+        rows.push([r.parsed.merchant,`${r.parsed.year}/${r.parsed.month}`,r.rec.status||'',r.rec.orders?.length||0,total,r.rec.discountReason||'',r.rec.discountAmt||0,r.rec.payDate||'',r.rec.payAmt||0]);
+      }
+      const ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,'對帳紀錄');
+    }
     dlBlob(xls2blob(wb),`清除備份_${dateStr}_${new Date().toLocaleDateString('zh-TW').replace(/\//g,'')}.xlsx`);
     _cleanupBackupDownloaded=true;notify('✅ 備份已下載，確認完成後可點擊「確認清除」');
-  }catch(e){notify('備份下載失敗：'+e.message,true)}
+  }catch(e){notify('備份下載失敗：'+e.message,true);console.error(e)}
 }
 function downloadCleanupBackupJSON(){
-  const dateStr=el('cleanupDate').value;const batches=DB.get('batches',{});const toDelete={};
-  for(const[id,b]of Object.entries(batches)){const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);const latest=dates.sort().pop()||'';if(latest&&latest<dateStr)toDelete[id]=b}
-  dlBlob(new Blob([JSON.stringify({version:3,type:'cleanup_backup',cleanupDate:dateStr,exportedAt:new Date().toISOString(),batches:toDelete},null,2)],{type:'application/json'}),`清除備份_${dateStr}.json`);
+  const dateStr=el('cleanupDate').value;
+  const{toRemove,oldRecons}=_scanCleanup(dateStr);
+  const payload={version:4,type:'cleanup_backup',cleanupDate:dateStr,exportedAt:new Date().toISOString(),
+    removedItems:toRemove.flatMap(t=>t.removedItems.map(i=>({...i,batchId:t.id,merchant:t.batch.merchant,fileName:t.batch.fileName}))),
+    removedRecons:oldRecons.reduce((o,r)=>{o[r.key]=r.rec;return o},{})
+  };
+  dlBlob(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),`清除備份_${dateStr}.json`);
   _cleanupBackupDownloaded=true;notify('✅ JSON 備份已下載');
 }
 function executeCleanup(){
   if(!_cleanupBackupDownloaded){notify('⚠️ 請先下載備份檔案再進行清除！',true);return}
-  if(!confirm('確定要清除嗎？此操作無法復原！\n\n請確認您已經下載並保存了備份檔案。'))return;
-  const dateStr=el('cleanupDate').value;const batches=DB.get('batches',{});const newBatches={};let cnt=0;
-  for(const[id,b]of Object.entries(batches)){const dates=b.items.map(r=>normDate(r.pickTime)).filter(Boolean);const latest=dates.sort().pop()||'';if(latest&&latest<dateStr)cnt++;else newBatches[id]=b}
-  DB.set('batches',newBatches);
+  const dateStr=el('cleanupDate').value;
+  if(!confirm(`確定要清除「${dateStr}」之前的訂單與對帳單嗎？\n\n此操作無法復原！請確認已下載備份檔案。`))return;
+  const{toRemove,oldRecons}=_scanCleanup(dateStr);
+  // 訂單：部分保留的更新，整批刪除的移除
+  const batches=DB.get('batches',{});
+  let cntItems=0,cntBatchFull=0,cntBatchPartial=0;
+  for(const t of toRemove){
+    cntItems+=t.removedItems.length;
+    if(!t.keptItems.length){delete batches[t.id];cntBatchFull++}
+    else{
+      batches[t.id]={...t.batch,items:t.keptItems,oids:[...new Set(t.keptItems.map(r=>r.oid))]};
+      cntBatchPartial++;
+    }
+  }
+  DB.set('batches',batches);
+  // 對帳紀錄：整筆刪除
+  const recons=DB.get('recons',{});
+  let cntRecons=0;
+  for(const r of oldRecons){delete recons[r.key];cntRecons++}
+  DB.set('recons',recons);
   el('cleanupPreview').style.display='none';el('confirmCleanBtn').style.display='none';el('cleanupDate').value='';_cleanupBackupDownloaded=false;
-  notify(`✅ 已清除 ${cnt} 個舊訂單批次`);showAllBatches();
+  notify(`✅ 已清除 ${cntItems} 筆訂單品項（${cntBatchFull} 批整刪 / ${cntBatchPartial} 批部分刪）+ ${cntRecons} 筆對帳紀錄`);
+  showAllBatches();
 }
 
 // ═══ RECONCILIATION ═══
