@@ -2403,7 +2403,9 @@ function searchRecon(){
       if(rec&&isAdmin(CUR?.role)){
         if(status==='店家對帳完成')html+=`<button class="btn btn-green btn-sm" onclick="markInvoiced('${escKey}')">標記發票已開立</button>`;
         html+=`<button class="btn btn-ghost btn-sm" onclick="archiveRecon('${escKey}')" title="封存到資料庫永久保存">📦 封存</button>`;
-        if(status==='好糰對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="送出給商家開始對帳">📤 送出對帳單</button>`;
+        const sentLabel=status==='好糰對帳中'?'📤 送出對帳單':'🔁 重新送出';
+        const sentTitle=status==='好糰對帳中'?'送出給商家開始對帳':`已送出過，點此重新送出（狀態會重設為「店家對帳中」）`;
+        html+=`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="${sentTitle}">${sentLabel}</button>`;
         html+=`<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="delRecon('${escKey}')" title="刪除">✕</button>`;
       }
     }
@@ -2545,12 +2547,29 @@ function sendRecon(){
 function sendReconByKey(key){
   if(!isAdmin(CUR?.role)){notify('只有管理者可以送出對帳單',true);return}
   const recons=DB.get('recons',{});
-  if(!recons[key]){notify('尚無對帳資料，請先匯出再匯入',true);return}
-  recons[key].status='店家對帳中';
-  recons[key].sentAt=new Date().toLocaleString('zh-TW');
-  recons[key].sentBy=CUR.nickname;
+  const rec=recons[key];
+  if(!rec){notify('找不到對帳單',true);return}
+  const cur=rec.status||'好糰對帳中';
+  // 已送出過 → 先 confirm（會覆蓋狀態）
+  if(cur!=='好糰對帳中'){
+    const statusLabel={
+      '店家對帳中':'目前狀態「店家對帳中」（已送出，商家正在對帳）',
+      '店家對帳完成':'目前狀態「店家對帳完成」（商家已完成對帳）',
+      '發票已開立':'目前狀態「發票已開立」'
+    }[cur]||`目前狀態「${cur}」`;
+    if(!confirm(`${statusLabel}\n\n確定要重新送出嗎？\n狀態會重設為「店家對帳中」，原本的對帳進度可能會被覆蓋。`))return;
+  }
+  rec.status='店家對帳中';
+  rec.sentAt=new Date().toLocaleString('zh-TW');
+  rec.sentBy=CUR.nickname||CUR.phone||'';
   DB.set('recons',recons);
-  searchRecon();notify('✅ 對帳單已送出，等待店家對帳');
+  // 重新整理當前 view
+  const activeTab=document.querySelector('.tab.active')?.id;
+  if(activeTab==='tab-archive')searchArchive();else searchRecon();
+  // 若正在明細頁，也 refresh
+  const reconListEl=el('reconList');
+  if(reconListEl&&reconListEl.querySelector('[onclick*="backFromReconDetail"]'))viewReconDetail(key);
+  notify(cur==='好糰對帳中'?'✅ 對帳單已送出，等待店家對帳':'🔁 已重新送出，狀態重設為「店家對帳中」');
 }
 function markInvoiced(key){
   if(!key){
@@ -2576,8 +2595,10 @@ function viewReconDetail(key){
   const mt=rec.merchant||parsed.merchant||'—';
   const label=parsed.label||(rec.df&&rec.dt?`${rec.df} ~ ${rec.dt}`:`${rec.year||'—'}/${rec.month||'—'}`);
   const escKey=key.replace(/'/g,"\\'");
-  const canSend=isAdmin(CUR?.role)&&(rec.status||'好糰對帳中')==='好糰對帳中';
-  const sendBtn=canSend?`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="送出給商家開始對帳">📤 送出對帳單</button>`:'';
+  const curStatus=rec.status||'好糰對帳中';
+  const sendLabel=curStatus==='好糰對帳中'?'📤 送出對帳單':'🔁 重新送出';
+  const sendTitle=curStatus==='好糰對帳中'?'送出給商家開始對帳':'已送出過，點此重新送出';
+  const sendBtn=isAdmin(CUR?.role)?`<button class="btn btn-primary btn-sm" onclick="sendReconByKey('${escKey}')" title="${sendTitle}">${sendLabel}</button>`:'';
   let html=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;background:var(--warm);border-radius:6px;flex-wrap:wrap">
     <button class="btn btn-ghost btn-sm" onclick="backFromReconDetail()">← 回到上一頁</button>
     <span style="font-size:13px;font-weight:700;color:var(--crust)">${mt} · ${label}</span>
