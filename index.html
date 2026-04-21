@@ -316,36 +316,34 @@ tbody td{padding:8px 11px;vertical-align:top}
   <div class="page" id="page-recon">
     <div class="card">
       <div class="card-title">💰 對帳作業</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <select class="select-in" id="reconMerchant" style="min-width:160px"><option value="">（選擇商家）</option></select>
-        <select class="select-in" id="reconStatus" style="width:140px">
+      <!-- 第一排：商家 / 狀態 / 日期區間 / 快捷鍵 / 生成、查詢 -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <select class="select-in" id="reconMerchant" style="min-width:150px"><option value="">（選擇商家）</option></select>
+        <select class="select-in" id="reconStatus" style="width:130px">
           <option value="">全部狀態</option>
           <option value="好糰對帳中">好糰對帳中</option>
           <option value="店家對帳中">店家對帳中</option>
           <option value="店家對帳完成">店家對帳完成</option>
           <option value="發票已開立">發票已開立</option>
         </select>
-        <button class="btn btn-primary btn-sm" onclick="searchRecon()">查詢</button>
-      </div>
-      <!-- 日期區間篩選（選填）+ 快捷鈕 -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--warm);border-radius:8px">
-        <div style="font-size:12px;color:var(--crust);font-weight:700;min-width:fit-content">📅 日期區間</div>
-        <input type="date" class="select-in" id="reconDateFrom" style="width:150px">
+        <input type="date" class="select-in" id="reconDateFrom" style="width:140px" title="起始日期">
         <span style="color:var(--muted)">~</span>
-        <input type="date" class="select-in" id="reconDateTo" style="width:150px">
-        <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(1)" title="把本頁年月的 1-15 日填入區間欄位">上半月 (1-15)</button>
-        <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(2)" title="把本頁年月的 16-月底 填入區間欄位">下半月 (16-月底)</button>
-        <button class="btn btn-ghost btn-sm" onclick="reconClearDateRange()">清除</button>
+        <input type="date" class="select-in" id="reconDateTo" style="width:140px" title="結束日期">
+        <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(1)" title="填入當月 1-15 日">上半月</button>
+        <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(2)" title="填入當月 16-月底">下半月</button>
+        <button class="btn btn-ghost btn-sm" onclick="reconClearDateRange()" title="清除日期">清除</button>
         <button class="btn btn-primary btn-sm" onclick="generateRecon()">🧾 生成對帳單</button>
+        <button class="btn btn-blue btn-sm" onclick="searchRecon()">🔍 查詢</button>
       </div>
-      <div id="reconSyncStatus" style="font-size:11px;color:var(--muted);margin-bottom:8px">☁️ Firebase 同步中…</div>
-      <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="hidden">
-        <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">匯出對帳單 Excel</button>
-        <button class="btn btn-ghost btn-sm" id="btnReconRebuild" onclick="rebuildReconFromBatches()" title="用最新訂單批次重算對帳單（保留調帳/匯款設定）">🔄 重算對帳單</button>
-        <label class="btn btn-green btn-sm" id="btnReconImport">匯入對帳單 Excel<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
-        <button class="btn btn-primary btn-sm hidden" id="btnReconSend" onclick="sendRecon()">送出對帳單</button>
+      <!-- 第二排：匯出 / 匯入 / 送出 / 重算 -->
+      <div id="reconActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" class="hidden">
+        <button class="btn btn-blue btn-sm" id="btnReconExport" onclick="exportReconExcel()">⬇️ 匯出對帳單</button>
+        <label class="btn btn-green btn-sm" id="btnReconImport">⬆️ 匯入對帳單<input type="file" accept=".xlsx,.xls" onchange="importReconExcel(this)" hidden></label>
+        <button class="btn btn-primary btn-sm hidden" id="btnReconSend" onclick="sendRecon()">📤 送出對帳單</button>
+        <button class="btn btn-ghost btn-sm" id="btnReconRebuild" onclick="rebuildReconFromBatches()" title="用最新訂單批次重算對帳單（保留匯款/狀態；調帳歸零）">🔄 重算對帳單</button>
         <button class="btn btn-primary btn-sm hidden" id="btnReconInvoice" onclick="markInvoiced()">標記發票已開立</button>
       </div>
+      <div id="reconSyncStatus" style="font-size:11px;color:var(--muted);margin-bottom:8px">☁️ Firebase 同步中…</div>
       <div id="reconList"></div>
       <!-- 區間查詢結果 -->
       <div id="reconRangeCard" class="hidden" style="margin-top:14px;padding-top:14px;border-top:2px solid var(--warm)"></div>
@@ -2563,12 +2561,25 @@ function markInvoiced(key){
   DB.set('recons',recons);
   searchRecon();notify('✅ 已標記發票已開立');
 }
+function backFromReconDetail(){
+  const activeTab=document.querySelector('.tab.active')?.id;
+  if(activeTab==='tab-archive')searchArchive();
+  else searchRecon();
+}
 function viewReconDetail(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
   const parsed=parseReconKey(key)||{};
   const mt=rec.merchant||parsed.merchant||'—';
   const label=parsed.label||(rec.df&&rec.dt?`${rec.df} ~ ${rec.dt}`:`${rec.year||'—'}/${rec.month||'—'}`);
-  let html=`<div style="font-size:12px;color:#666;margin-bottom:8px">${mt} · ${label} · 狀態：${rec.status||'好糰對帳中'}</div>`;
+  const escKey=key.replace(/'/g,"\\'");
+  let html=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:8px 12px;background:var(--warm);border-radius:6px;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" onclick="backFromReconDetail()">← 回到上一頁</button>
+    <span style="font-size:13px;font-weight:700;color:var(--crust)">${mt} · ${label}</span>
+    <span style="font-size:12px;color:var(--muted)">狀態：${rec.status||'好糰對帳中'}</span>
+    <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="downloadReconExcel('${escKey}')">⬇️ 下載 Excel</button>
+    </span>
+  </div>`;
   html+=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th style="text-align:right">金額</th><th style="text-align:right">折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
   let tAmt=0,tDiscount=0,tFee=0,tRecv=0;
   rec.orders.forEach(o=>{
@@ -2603,7 +2614,7 @@ function viewMerchantReconDetail(key){
   const parsed=parseReconKey(key)||{};
   const mt=rec.merchant||parsed.merchant||'—';
   const label=parsed.label||(rec.df&&rec.dt?`${rec.df} ~ ${rec.dt}`:`${rec.year||'—'}/${rec.month||'—'}`);
-  el('merchantReconInfo').textContent=`${mt} · ${label} · 共 ${rec.orders.length} 筆 · 狀態：${rec.status||'好糰對帳中'}`;
+  el('merchantReconInfo').innerHTML=`<button class="btn btn-ghost btn-sm" onclick="el('merchantReconCard').classList.add('hidden');backFromReconDetail()" style="margin-right:10px">← 回到上一頁</button><span>${mt} · ${label} · 共 ${rec.orders.length} 筆 · 狀態：${rec.status||'好糰對帳中'}</span>`;
   let tRecv=0,tFee=0,tAmt=0,tDiscount=0;
   let html=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th>地址</th><th style="text-align:right">金額</th><th style="text-align:right">好糰折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>對帳</th></tr>`;
   rec.orders.forEach(o=>{
@@ -2638,7 +2649,7 @@ function openMerchantRecon(key){
   const parsed=parseReconKey(key)||{};
   const label=parsed.label||`${rec.year}/${rec.month}`;
   const mt=rec.merchant||parsed.merchant||'';
-  el('merchantReconInfo').textContent=`${mt} · ${label} · 共 ${rec.orders.length} 筆`;
+  el('merchantReconInfo').innerHTML=`<button class="btn btn-ghost btn-sm" onclick="el('merchantReconCard').classList.add('hidden');backFromReconDetail()" style="margin-right:10px">← 回到上一頁</button><span>${mt} · ${label} · 共 ${rec.orders.length} 筆</span>`;
   let html=`<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="background:#f5f0e8"><th style="padding:4px;text-align:left">日期</th><th>訂單ID</th><th>聯絡人</th><th>地址</th><th style="text-align:right">金額</th><th style="text-align:right">好糰折扣</th><th style="text-align:right">服務費</th><th style="text-align:right">應收</th><th>結果</th></tr>`;
   rec.orders.forEach((o,i)=>{
     html+=`<tr style="border-bottom:1px solid #eee"><td style="padding:3px">${o.pickTime||''}</td><td>${o.oid}</td><td>${o.buyer}</td><td style="font-size:10px">${o.addr||''}</td><td style="text-align:right">$${o.amount.toLocaleString()}</td><td style="text-align:right;color:#e67e22">${o.discount?'$'+o.discount.toLocaleString():''}</td><td style="text-align:right">$${(o.fee||0).toLocaleString()}</td><td style="text-align:right">$${(o.recv||0).toLocaleString()}</td><td><select class="select-in" style="font-size:10px;width:70px" data-idx="${i}"><option value="正確">正確</option><option value="錯誤"${o.result==='錯誤'?' selected':''}>錯誤</option></select></td></tr>`;
