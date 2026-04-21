@@ -212,7 +212,7 @@ Firebase Realtime DB
 
 ```
 （下個 commit）cleanup: 刪貼紙店名/每張最多品項數死設定 + 對帳查詢自動連帶區間搜尋（2026-04-21）
-（下個 commit）feat(merchant): 商家詳細資料 + 自我編輯（抬頭/統編/取貨/聯絡/撥款/帳簿）（2026-04-21）
+5c617bd feat(merchant): 商家詳細資料 + 自我編輯（抬頭/統編/取貨/聯絡/撥款/帳簿）（2026-04-21）
 494efe6 refactor(recon): 對帳 key 改為區間制，同商家可多筆（2026-04-21）
 eba0d08 fix+feat: 清除舊訂單改 per-item（含對帳紀錄）+ 備份改 Excel 業務資料（2026-04-21）
 72e785d feat(users): 帳號管理擴充（上限 3 / 篩選 / 改暱稱改密碼 / 鎖定解鎖 / 刪除 confirm）（2026-04-21）
