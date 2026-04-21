@@ -2604,6 +2604,78 @@ function backFromReconDetail(){
   if(activeTab==='tab-archive')searchArchive();
   else searchRecon();
 }
+// ═══ 編輯對帳單內單筆訂單（金額 / 折扣 / 服務費 / 應收 / 對帳結果）═══
+function editReconOrder(key,idx){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以編輯',true);return}
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec||!rec.orders||!rec.orders[idx]){notify('找不到訂單',true);return}
+  if(rec.archivedAt){notify('此對帳單已封存，請先取消封存再編輯',true);return}
+  const o=rec.orders[idx];
+  document.getElementById('reconOrderEditOverlay')?.remove();
+  const ov=document.createElement('div');
+  ov.id='reconOrderEditOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
+  const esc=s=>String(s==null?'':s).replace(/"/g,'&quot;');
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 26px;width:100%;max-width:560px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;font-size:17px;color:var(--crust);margin-bottom:4px">✏️ 編輯訂單金額</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">訂單 <strong style="font-family:'DM Mono',monospace">${o.oid}</strong> · ${o.buyer||''} · ${o.pickTime||''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div><label style="font-size:11px;color:var(--muted)">商品總金額</label><input type="number" class="inp" id="roe_amount" value="${+o.amount||0}" style="width:100%;font-family:'DM Mono',monospace"></div>
+      <div><label style="font-size:11px;color:var(--muted)">好糰折扣</label><input type="number" class="inp" id="roe_discount" value="${+o.discount||0}" style="width:100%;font-family:'DM Mono',monospace"></div>
+      <div><label style="font-size:11px;color:var(--muted)">服務費計算基礎</label><input type="number" class="inp" id="roe_base" value="${+(o.base||o.amount||0)}" style="width:100%;font-family:'DM Mono',monospace"></div>
+      <div><label style="font-size:11px;color:var(--muted)">服務費</label><input type="number" class="inp" id="roe_fee" value="${+o.fee||0}" style="width:100%;font-family:'DM Mono',monospace"></div>
+      <div><label style="font-size:11px;color:var(--muted)">應收</label><input type="number" class="inp" id="roe_recv" value="${+o.recv||0}" style="width:100%;font-family:'DM Mono',monospace;font-weight:700;color:var(--bread)"></div>
+      <div><label style="font-size:11px;color:var(--muted)">對帳結果</label>
+        <select class="select-in" id="roe_result" style="width:100%">
+          <option value="正確"${(!o.result||o.result==='正確')?' selected':''}>正確</option>
+          <option value="錯誤"${o.result==='錯誤'?' selected':''}>錯誤</option>
+        </select>
+      </div>
+    </div>
+    <div style="padding:10px 12px;background:var(--warm);border-radius:6px;margin-bottom:14px;font-size:12px;line-height:1.7">
+      <div style="font-weight:700;color:var(--crust);margin-bottom:4px">💡 公式小幫手</div>
+      <div>基礎 = 商品金額 − 折扣 ｜ 服務費 = 基礎 × 17% ｜ 應收 = 基礎 − 服務費</div>
+      <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="reconOrderRecalc()">🧮 依公式自動重算（基礎/服務費/應收）</button>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="document.getElementById('reconOrderEditOverlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="saveReconOrderEdit('${key.replace(/'/g,"\\'")}',${idx})">💾 儲存</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+// 依公式自動重算基礎/服務費/應收
+function reconOrderRecalc(){
+  const amt=+el('roe_amount').value||0;
+  const disc=+el('roe_discount').value||0;
+  const base=amt-disc;
+  const fee=Math.round(base*0.17);
+  const recv=base-fee;
+  el('roe_base').value=base;
+  el('roe_fee').value=fee;
+  el('roe_recv').value=recv;
+}
+function saveReconOrderEdit(key,idx){
+  if(!isAdmin(CUR?.role)){notify('權限不足',true);return}
+  const recons=DB.get('recons',{});const rec=recons[key];if(!rec||!rec.orders||!rec.orders[idx])return;
+  const amt=+el('roe_amount').value||0;
+  const disc=+el('roe_discount').value||0;
+  const base=+el('roe_base').value||0;
+  const fee=+el('roe_fee').value||0;
+  const recv=+el('roe_recv').value||0;
+  const result=el('roe_result').value||'正確';
+  rec.orders[idx].amount=amt;
+  rec.orders[idx].discount=disc;
+  rec.orders[idx].base=base;
+  rec.orders[idx].fee=fee;
+  rec.orders[idx].recv=recv;
+  rec.orders[idx].result=result;
+  rec.updatedAt=new Date().toLocaleString('zh-TW');
+  rec.updatedBy=CUR?.nickname||CUR?.phone||'';
+  DB.set('recons',recons);
+  document.getElementById('reconOrderEditOverlay')?.remove();
+  notify(`✅ 已更新訂單 ${rec.orders[idx].oid}`);
+  viewReconDetail(key);// 重 render 讓合計即時更新
+}
 function viewReconDetail(key){
   const recons=DB.get('recons',{});const rec=recons[key];if(!rec)return;
   const parsed=parseReconKey(key)||{};
@@ -2627,6 +2699,7 @@ function viewReconDetail(key){
   </div>`;
   // 訂單明細表（欄位與下載 Excel 一致：取件日期、星期、訂單ID、主聯絡人、外送地址、商品總金額、好糰折扣、服務費計算基礎、服務費、應收、對帳結果）
   const dayMap={'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+  const canEditOrder=isAdmin(CUR?.role);
   html+=`<div class="tbl-wrap" style="margin-bottom:12px"><table style="width:100%;font-size:11px;border-collapse:collapse">
     <thead><tr style="background:#f5f0e8;font-weight:700">
       <th style="padding:5px 4px;text-align:left;width:90px">取件日期</th>
@@ -2640,13 +2713,15 @@ function viewReconDetail(key){
       <th style="padding:5px 4px;text-align:right;width:64px">服務費</th>
       <th style="padding:5px 4px;text-align:right;width:72px">應收</th>
       <th style="padding:5px 4px;text-align:center;width:60px">對帳結果</th>
+      ${canEditOrder?'<th style="padding:5px 4px;text-align:center;width:50px">操作</th>':''}
     </tr></thead><tbody>`;
   let tAmt=0,tDiscount=0,tBase=0,tFee=0,tRecv=0;
-  rec.orders.forEach(o=>{
+  rec.orders.forEach((o,idx)=>{
     tAmt+=o.amount||0;tDiscount+=o.discount||0;tBase+=(o.base||o.amount||0);tFee+=o.fee||0;tRecv+=o.recv||0;
     const rc=o.result==='錯誤'?'color:#c55;font-weight:700':'';
     const dt2=new Date(o.pickTime);const wk=isNaN(dt2)?'':dayMap[dt2.getDay()];
     const d=normDate(o.pickTime)||o.pickTime||'';
+    const editBtn=canEditOrder?`<td style="padding:4px;text-align:center"><button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" title="編輯此筆" onclick="editReconOrder('${escKey}',${idx})">✏️</button></td>`:'';
     html+=`<tr style="border-bottom:1px solid #eee">
       <td style="padding:4px;font-family:'DM Mono',monospace">${d}</td>
       <td style="padding:4px;text-align:center">${wk}</td>
@@ -2659,6 +2734,7 @@ function viewReconDetail(key){
       <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace">$${(o.fee||0).toLocaleString()}</td>
       <td style="padding:4px;text-align:right;font-family:'DM Mono',monospace;font-weight:600">$${(o.recv||0).toLocaleString()}</td>
       <td style="padding:4px;text-align:center;${rc}">${o.result||'正確'}</td>
+      ${editBtn}
     </tr>`;
   });
   html+=`<tr style="font-weight:700;border-top:2px solid #333;background:#f9f6f0">
@@ -2668,7 +2744,7 @@ function viewReconDetail(key){
       <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tBase.toLocaleString()}</td>
       <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tFee.toLocaleString()}</td>
       <td style="padding:5px 4px;text-align:right;font-family:'DM Mono',monospace">$${tRecv.toLocaleString()}</td>
-      <td></td>
+      <td></td>${canEditOrder?'<td></td>':''}
     </tr></tbody></table></div>`;
   // 調帳與匯款小計區（兩欄網格）— 跟 Excel 底部資訊一致
   const discAmt=rec.discountAmt||0;
