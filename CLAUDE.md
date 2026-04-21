@@ -98,6 +98,14 @@ Firebase Realtime DB
   - 勾選 = 用新資料取代（舊批次對應品項移除，空批次自動刪除）
   - 不勾 = 略過此筆（保留舊資料，新匯入捨棄）
   - 解決「同筆訂單重複計入預覽分裝表」的 bug
+- **對帳頁移除年/月下拉選單，改用日期區間推算（2026-04-21）**
+  - UI 拿掉 `reconYear` / `reconMonth` 兩個下拉選單
+  - 現有查詢欄位：商家選擇、狀態選擇、日期區間
+  - 新 helper `getReconCurYM()`：從 reconDateFrom → reconDateTo → 今日 依序推算 {year,month}
+  - 新 helper `parseReconKey(key)`：把 `recon_YYYY_M_商家` 解析回 {year,month,merchant}
+  - `searchRecon` 改為列出該商家（或全部商家）**所有**對帳紀錄，按年月降冪；每筆卡片標示年/月、狀態、重算時間、調帳金額 tag
+  - 上半月/下半月快捷、exportReconExcel、rebuildReconFromBatches、sendRecon、markInvoiced、importReconExcel 全部改用 `getReconCurYM()`
+  - 若 Ken 要處理特定歷史月份，先在日期區間輸入那個月的某一天即可（helper 會推算年月）
 - **匯出對帳單支援日期區間 + 調帳歸零（2026-04-20，再修正）**
   - Issue 1: 有設日期區間時，「匯出對帳單 Excel」會依區間過濾 batches，檔名 `對帳單_商家_YYYY-MM-DD_至_YYYY-MM-DD.xlsx`（或單日 `對帳單_商家_YYYY-MM-DD.xlsx`）
   - 區間模式會略過 cache，直接從 batches 讀最新資料
@@ -131,6 +139,7 @@ Firebase Realtime DB
 ## 最近 10 筆 commit
 
 ```
+（下個 commit）refactor(recon): 移除年/月下拉，改從日期區間推算；對帳清單列出全部（2026-04-21）
 b3931b4 fix(recon): 匯出對帳單支援日期區間 + 重算時調帳歸零（2026-04-20）
 1a1aad6 fix(recon): 匯出對帳單時自動偵測 cache 過期 + 手動重算按鈕（2026-04-20）
 97fb772 feat(recon): 對帳頁日期區間查詢 + 上半月/下半月快捷 + Firebase 同步狀態（2026-04-20）

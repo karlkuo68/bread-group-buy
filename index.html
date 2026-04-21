@@ -314,8 +314,6 @@ tbody td{padding:8px 11px;vertical-align:top}
     <div class="card">
       <div class="card-title">💰 對帳作業</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <select class="select-in" id="reconYear" style="width:100px"></select>
-        <select class="select-in" id="reconMonth" style="width:90px"></select>
         <select class="select-in" id="reconMerchant" style="min-width:160px"><option value="">（選擇商家）</option></select>
         <select class="select-in" id="reconStatus" style="width:140px">
           <option value="">全部狀態</option>
@@ -1458,10 +1456,7 @@ function executeCleanup(){
 
 // ═══ RECONCILIATION ═══
 function initReconPage(){
-  const yr=el('reconYear'),mo=el('reconMonth'),ms=el('reconMerchant');
-  const now=new Date();const cy=now.getFullYear();
-  yr.innerHTML='';for(let y=cy;y>=cy-2;y--)yr.innerHTML+=`<option value="${y}">${y}</option>`;
-  mo.innerHTML='';for(let m=1;m<=12;m++)mo.innerHTML+=`<option value="${m}"${m===now.getMonth()+1?' selected':''}>${m}月</option>`;
+  const ms=el('reconMerchant');
   const list=getMerchants();
   if(CUR?.role==='merchant'){
     ms.innerHTML=`<option value="${CUR.businessName}">${CUR.businessName}</option>`;
@@ -1489,8 +1484,8 @@ function updateSyncStatus(){
 }
 // ═══ 對帳頁：日期區間快捷 ═══
 function reconSetHalfMonth(half){
-  const y=+el('reconYear').value,m=+el('reconMonth').value;
-  if(!y||!m){notify('請先選擇年 / 月',true);return}
+  // 從現有日期區間推算年月，若沒填則用今天
+  const {year:y,month:m}=getReconCurYM();
   const p=n=>String(n).padStart(2,'0');
   if(half===1){
     el('reconDateFrom').value=`${y}-${p(m)}-01`;
@@ -1591,6 +1586,22 @@ function exportReconRangeExcel(){
   notify('✅ 區間 Excel 已匯出');
 }
 function getReconKey(year,month,merchant){return`recon_${year}_${month}_${merchant}`}
+// 從日期區間推算「目前操作中的對帳月份」。優先順序：reconDateFrom > reconDateTo > 今日
+function getReconCurYM(){
+  const df=el('reconDateFrom')?.value||el('reconDateTo')?.value||'';
+  if(df){
+    const m=df.match(/^(\d{4})-(\d{2})/);
+    if(m)return{year:+m[1],month:+m[2]};
+  }
+  const now=new Date();
+  return{year:now.getFullYear(),month:now.getMonth()+1};
+}
+// 解析 recons key：recon_2026_4_商家名 → {year,month,merchant}
+function parseReconKey(key){
+  const m=key.match(/^recon_(\d+)_(\d+)_(.+)$/);
+  if(!m)return null;
+  return{year:+m[1],month:+m[2],merchant:m[3]};
+}
 // ═══ 防呆：偵測對帳單 cache 與 batches 是否不一致（避免匯出時用到舊快照）═══
 function detectReconStale(cachedOrders,merchant,year,month){
   const batches=DB.get('batches',{});
@@ -1679,7 +1690,7 @@ function regenerateReconFromBatches(year,month,merchant,preserveMeta){
 }
 // 管理者主動按「🔄 重算對帳單」時呼叫
 function rebuildReconFromBatches(){
-  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const{year,month}=getReconCurYM();
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請先選擇商家',true);return}
   if(!confirm(`確定要用最新訂單重算「${merchant} ${year}年${month}月」對帳單？\n\n✅ 保留：匯款日期/金額、對帳狀態、每筆訂單的手動調整（金額未變時）\n⚠️ 歸零：調帳原因、調帳金額（訂單變動後需重新評估）\n🔄 重產：訂單清單（以 batches 為準）`))return;
@@ -1693,20 +1704,26 @@ function rebuildReconFromBatches(){
   searchRecon();
 }
 function searchRecon(){
-  const year=+el('reconYear').value,month=+el('reconMonth').value;
   const merchant=el('reconMerchant').value,statusF=el('reconStatus').value;
   const recons=DB.get('recons',{});
-  let html='';let found=false;
-  const merchants=merchant?[merchant]:getMerchants();
-  for(const m of merchants){
-    const key=getReconKey(year,month,m);
-    const rec=recons[key];
-    const status=rec?rec.status:'好糰對帳中';
-    if(statusF&&status!==statusF)continue;
-    found=true;
-    const SC={'好糰對帳中':'#999','店家對帳中':'#e67e22','店家對帳完成':'#27ae60','發票已開立':'#2980b9'};
-    const total=rec?rec.orders.reduce((s,o)=>s+o.amount,0):0;
-    html+=`<div class="history-item"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m}</div><div class="hi-meta">${year}年${month}月${rec?' · '+rec.orders.length+'筆 · $'+total.toLocaleString():' · 尚未產出對帳單'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span></div></div><div class="hi-actions">`;
+  // 列出所有對帳紀錄，依 merchant / status 篩選，按 年月 降冪
+  let entries=Object.entries(recons).map(([key,rec])=>{
+    const parsed=parseReconKey(key);
+    return parsed?{key,rec,...parsed}:null;
+  }).filter(Boolean);
+  if(merchant)entries=entries.filter(e=>e.merchant===merchant);
+  if(statusF)entries=entries.filter(e=>(e.rec?.status||'好糰對帳中')===statusF);
+  entries.sort((a,b)=>(b.year-a.year)||(b.month-a.month)||a.merchant.localeCompare(b.merchant));
+  const SC={'好糰對帳中':'#999','店家對帳中':'#e67e22','店家對帳完成':'#27ae60','發票已開立':'#2980b9'};
+  let html='';
+  for(const e of entries){
+    const{key,rec,year,month,merchant:m}=e;
+    const status=rec?.status||'好糰對帳中';
+    const total=rec?.orders?.reduce((s,o)=>s+(o.amount||0),0)||0;
+    const discAmt=rec?.discountAmt||0;
+    const rebuilt=rec?.rebuiltAt?`<span class="hi-tag" style="background:#f0e6d2;color:var(--crust);font-size:10px">🔄 ${rec.rebuiltAt.slice(5,16)}</span>`:'';
+    const discTag=discAmt?`<span class="hi-tag" style="background:#fdf4e3;color:var(--bread);font-size:10px">調帳 ${discAmt>0?'+':''}$${discAmt.toLocaleString()}</span>`:'';
+    html+=`<div class="history-item"><div class="hi-icon">💰</div><div class="hi-info"><div class="hi-name">${m} · <span style="color:var(--bread);font-family:'DM Mono',monospace">${year}/${month}</span></div><div class="hi-meta">${rec?rec.orders.length+'筆 · $'+total.toLocaleString():'（空的）'}</div><div class="hi-tags"><span class="hi-tag" style="background:${SC[status]||'#999'};color:#fff">${status}</span>${rebuilt}${discTag}</div></div><div class="hi-actions">`;
     if(CUR?.role==='merchant'){
       if(status==='店家對帳中')html+=`<button class="btn btn-primary btn-sm" onclick="openMerchantRecon('${key}')">開始對帳</button>`;
       if(rec&&(status==='店家對帳完成'||status==='發票已開立'))html+=`<button class="btn btn-blue btn-sm" onclick="viewMerchantReconDetail('${key}')">📋 查詢明細</button>`;
@@ -1716,11 +1733,15 @@ function searchRecon(){
     }
     html+=`</div></div>`;
   }
-  if(!found)html='<div class="empty-state"><div class="empty-icon">💰</div><div>無符合條件的對帳紀錄</div></div>';
+  if(!entries.length){
+    const hint=merchant?`「${merchant}」尚無對帳紀錄。選好商家後，用下方「匯出對帳單 Excel」或「🔄 重算對帳單」即可建立當月紀錄。`:'目前沒有任何對帳紀錄。請先選擇商家並用「匯出對帳單 Excel」建立。';
+    html=`<div class="empty-state"><div class="empty-icon">💰</div><div style="max-width:420px;margin:0 auto;line-height:1.6;color:var(--muted)">${hint}</div></div>`;
+  }
   el('reconList').innerHTML=html;
-  // 控制匯出按鈕
+  // 控制匯出按鈕列
   if(merchant&&isAdmin(CUR?.role)){
     el('reconActions').classList.remove('hidden');
+    const{year,month}=getReconCurYM();
     const key=getReconKey(year,month,merchant);
     const rec=recons[key];
     el('btnReconSend').classList.toggle('hidden',!rec||rec.status!=='好糰對帳中');
@@ -1730,7 +1751,7 @@ function searchRecon(){
   }
 }
 function exportReconExcel(){
-  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const{year,month}=getReconCurYM();
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請選擇商家',true);return}
   // 日期區間（選填）— 若有設則以區間匯出，不用整月 cache
@@ -1847,7 +1868,7 @@ function exportReconExcel(){
   notify(`✅ 對帳單已匯出 ${modeDesc}`);
 }
 function importReconExcel(inp){
-  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const{year,month}=getReconCurYM();
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請選擇商家',true);inp.value='';return}
   const f=inp.files[0];if(!f){return}
@@ -1884,7 +1905,7 @@ function importReconExcel(inp){
   reader.readAsArrayBuffer(f);inp.value='';
 }
 function sendRecon(){
-  const year=+el('reconYear').value,month=+el('reconMonth').value;
+  const{year,month}=getReconCurYM();
   const merchant=el('reconMerchant').value;
   if(!merchant){notify('請選擇商家',true);return}
   const key=getReconKey(year,month,merchant);
@@ -1898,7 +1919,8 @@ function sendRecon(){
 }
 function markInvoiced(key){
   if(!key){
-    const year=+el('reconYear').value,month=+el('reconMonth').value,merchant=el('reconMerchant').value;
+    const{year,month}=getReconCurYM();
+    const merchant=el('reconMerchant').value;
     if(!merchant){notify('請選擇商家',true);return}
     key=getReconKey(year,month,merchant);
   }
