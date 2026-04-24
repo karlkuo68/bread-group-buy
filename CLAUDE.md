@@ -1,7 +1,7 @@
 # 麵包團購系統 (bread-group-buy)
 
 > **此檔案給 Claude 讀的專案記憶。在這個資料夾工作時，請先讀完本檔再動手。**
-> 最後更新：2026-04-20
+> 最後更新：2026-04-23
 
 ---
 
@@ -77,7 +77,7 @@ Firebase Realtime DB
 - **技術棧**：單檔 HTML + Firebase Realtime Database (compat SDK 10.12.0) + XLSX (SheetJS 0.18.5) + jsPDF 2.5.1
 - **字型**：Noto Serif TC / Noto Sans TC / DM Mono
 - **主題色**：cream / bread / crust 麵包色系（CSS variables）
-- **最後修改**：2026-04-09 16:25（本地檔案）
+- **最後修改**：2026-04-21 14:51（本地檔案）
 
 ---
 
