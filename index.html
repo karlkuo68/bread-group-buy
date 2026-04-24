@@ -226,7 +226,7 @@ tbody td{padding:8px 11px;vertical-align:top}
   <div class="hdr">
     <div class="hdr-icon">🍞</div>
     <div><div class="hdr-title">麵包團購管理系統</div><div class="hdr-sub">Bread Group-Buy Management</div></div>
-    <div class="hdr-right"><span class="user-badge" id="userBadge"></span><button class="btn btn-ghost btn-sm" onclick="doLogout()">登出</button></div>
+    <div class="hdr-right"><span id="notifBell" style="margin-right:6px"></span><span class="user-badge" id="userBadge"></span><button class="btn btn-ghost btn-sm" onclick="doLogout()">登出</button></div>
   </div>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('import')" id="tab-import">① 匯入訂單</div>
@@ -573,7 +573,12 @@ function enterApp(){
   el('tab-settings').classList.toggle('hidden',isMerchant);
   if(isMerchant){switchTab('orders')}
   loadSettings();renderUsers();refreshMerchantSelect();populateNewBizSelect();showAllBatches();
-  renderMerchantSelfCard();
+  renderMerchantSelfCard();renderNotifBell();
+  // 管理者登入即時提示未讀通知
+  if(isAdmin(CUR.role)||CUR.role==='cs'){
+    const n=getUnreadNotifCount();
+    if(n>0)setTimeout(()=>notify(`🔔 有 ${n} 則未讀通知，點右上方鈴鐺查看`),500);
+  }
   if(isAdmin(CUR.role))checkAutoBackup();
 }
 function doLogout(){localStorage.removeItem('bread_session');CUR=null;el('mainApp').classList.add('hidden');el('loginScreen').classList.remove('hidden');showLogin();el('loginUser').value='';el('loginPass').value=''}
@@ -859,9 +864,142 @@ function canEditMerchant(name){
   if(CUR.role==='merchant'&&CUR.businessName===name)return true;
   return false;
 }
-function hasMerchantProfile(name){
+// 商家資料必填欄位（備註例外）
+const MERCHANT_REQUIRED_FIELDS=['title','taxId','pickupAddr','contactName','contactPhone','contactEmail','bankName','bankBranch','bankAccount','accountHolder','passbookImage'];
+// 商家本人不可改的欄位（涉及合約/發票/實體物流）
+const MERCHANT_LOCKED_FIELDS_FOR_SELF=['title','taxId','pickupAddr'];
+const MERCHANT_FIELD_LABELS={
+  title:'發票抬頭',taxId:'統一編號',pickupAddr:'取貨地點',
+  contactName:'聯絡人姓名',contactPhone:'聯絡電話',contactEmail:'聯絡 Email',
+  bankName:'銀行',bankBranch:'分行',bankAccount:'帳號',accountHolder:'戶名',
+  passbookImage:'帳簿/存摺影本',passbookFileName:'帳簿檔名',notes:'備註'
+};
+// 回傳 {complete, missingFields:[]}；complete = 所有必填都有值
+function getMerchantProfileStatus(name){
   const i=getMerchantInfo(name);
-  return!!(i.title||i.taxId||i.pickupAddr||i.contactPhone||i.bankAccount);
+  const missing=MERCHANT_REQUIRED_FIELDS.filter(f=>!String(i[f]||'').trim());
+  return{complete:missing.length===0,missingFields:missing};
+}
+function hasMerchantProfile(name){return getMerchantProfileStatus(name).complete}
+// ═══ 通知中心（管理者收商家修改資料的通知）═══
+// 通知 email（可之後接 EmailJS 或 Firebase Functions 發信）
+const NOTIFY_EMAIL='believe.in.1061213@gmail.com';
+function addAdminNotification(type,payload){
+  const list=DB.get('notifications',[])||[];
+  list.push({
+    id:'n_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    type,
+    at:new Date().toLocaleString('zh-TW'),
+    by:CUR?.nickname||CUR?.phone||'未知',
+    byRole:CUR?.role||'',
+    byPhone:CUR?.phone||'',
+    byBusiness:CUR?.businessName||'',
+    payload,
+    read:false,readAt:'',readBy:''
+  });
+  // 最多保留 300 筆
+  if(list.length>300)list.splice(0,list.length-300);
+  DB.set('notifications',list);
+  console.log(`[notify] ${type}`,payload,`→ 若已設 EmailJS 會寄到 ${NOTIFY_EMAIL}`);
+}
+function getUnreadNotifCount(){
+  if(!isAdmin(CUR?.role)&&CUR?.role!=='cs')return 0;
+  return((DB.get('notifications',[])||[]).filter(n=>!n.read).length);
+}
+function renderNotifBell(){
+  const host=el('notifBell');if(!host)return;
+  if(!isAdmin(CUR?.role)&&CUR?.role!=='cs'){host.innerHTML='';return}
+  const n=getUnreadNotifCount();
+  const badge=n?`<span style="position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center">${n>99?'99+':n}</span>`:'';
+  host.innerHTML=`<button class="btn btn-ghost btn-sm" style="position:relative" onclick="openNotifications()" title="通知中心">🔔${badge}</button>`;
+}
+function openNotifications(){
+  if(!isAdmin(CUR?.role)&&CUR?.role!=='cs'){notify('權限不足',true);return}
+  document.getElementById('notifOverlay')?.remove();
+  const list=(DB.get('notifications',[])||[]).slice().reverse();
+  const unread=list.filter(n=>!n.read).length;
+  const ov=document.createElement('div');
+  ov.id='notifOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
+  const rowsHtml=list.length?list.map(n=>{
+    const typeLabel={merchant_profile_updated:'商家資料更新'}[n.type]||n.type;
+    const changesHtml=(()=>{
+      if(n.type==='merchant_profile_updated'&&n.payload?.diff){
+        return Object.entries(n.payload.diff).map(([k,v])=>{
+          const lbl=MERCHANT_FIELD_LABELS[k]||k;
+          const oldV=String(v.old||'（空）').length>30?String(v.old).slice(0,30)+'…':v.old||'（空）';
+          const newV=String(v.new||'（空）').length>30?String(v.new).slice(0,30)+'…':v.new||'（空）';
+          return`<div style="font-size:11px;margin-top:2px"><span style="color:var(--muted)">${lbl}：</span><span style="color:#888;text-decoration:line-through">${oldV}</span> → <span style="color:var(--crust);font-weight:600">${newV}</span></div>`;
+        }).join('');
+      }return'';
+    })();
+    const bg=n.read?'#fafaf7':'#fff8f0';const bd=n.read?'1px solid #eee':'1.5px solid var(--bread)';
+    return`<div style="padding:10px 12px;border-radius:8px;margin-bottom:8px;background:${bg};border:${bd}">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        ${n.read?'':'<span style="background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px">未讀</span>'}
+        <span style="font-weight:700;color:var(--crust);font-size:13px">${typeLabel}</span>
+        <span style="font-size:11px;color:var(--muted)">${n.payload?.merchant?'🏪 '+n.payload.merchant+' · ':''}${n.at}</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">操作人：${n.by}${n.byBusiness?'（'+n.byBusiness+'）':''}</div>
+      ${changesHtml}
+      ${!n.read?`<button class="btn btn-ghost btn-sm" style="margin-top:6px;font-size:11px;padding:2px 10px" onclick="markNotifRead('${n.id}')">標為已讀</button>`:''}
+    </div>`;
+  }).join(''):'<div style="padding:30px;text-align:center;color:var(--muted)">目前沒有通知</div>';
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 24px;width:100%;max-width:620px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="display:flex;align-items:center;margin-bottom:12px">
+      <div style="font-weight:800;font-size:17px;color:var(--crust);flex:1">🔔 通知中心 ${unread?`<span style="font-size:13px;color:var(--red)">· 未讀 ${unread}</span>`:''}</div>
+      ${unread?`<button class="btn btn-ghost btn-sm" onclick="markAllNotifRead()">全部已讀</button>`:''}
+      <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="document.getElementById('notifOverlay').remove()">關閉</button>
+    </div>
+    <div style="flex:1;overflow-y:auto">${rowsHtml}</div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function markNotifRead(id){
+  const list=DB.get('notifications',[])||[];
+  const n=list.find(x=>x.id===id);if(!n)return;
+  n.read=true;n.readAt=new Date().toLocaleString('zh-TW');n.readBy=CUR?.nickname||CUR?.phone||'';
+  DB.set('notifications',list);openNotifications();renderNotifBell();
+}
+function markAllNotifRead(){
+  const list=DB.get('notifications',[])||[];
+  const now=new Date().toLocaleString('zh-TW');
+  list.forEach(n=>{if(!n.read){n.read=true;n.readAt=now;n.readBy=CUR?.nickname||CUR?.phone||''}});
+  DB.set('notifications',list);openNotifications();renderNotifBell();
+}
+// 比對新舊資料產生 diff：{欄位:{old,new}}
+function diffMerchantInfo(oldInfo,newInfo){
+  const diff={};
+  const keys=new Set([...Object.keys(MERCHANT_FIELD_LABELS)]);
+  for(const k of keys){
+    const o=oldInfo?.[k]||'',n=newInfo?.[k]||'';
+    if(String(o)!==String(n)){
+      // 帳簿影本內容太長，只標示「更新」避免通知欄爆量
+      if(k==='passbookImage'){
+        if(o!==n)diff[k]={old:o?'（舊影本）':'（未上傳）',new:n?'（新影本）':'（已清除）'};
+      }else{
+        diff[k]={old:o,new:n};
+      }
+    }
+  }
+  return diff;
+}
+// 新增一筆修改歷程
+function addMerchantHistory(name,diff){
+  if(!Object.keys(diff).length)return;
+  const hist=DB.get('merchantHistory',{})||{};
+  if(!hist[name])hist[name]=[];
+  hist[name].push({
+    at:new Date().toLocaleString('zh-TW'),
+    by:CUR?.nickname||CUR?.phone||'未知',
+    byRole:CUR?.role||'',
+    byPhone:CUR?.phone||'',
+    byBusiness:CUR?.businessName||'',
+    diff
+  });
+  // 最多保留 200 筆，避免 Firebase 超量
+  if(hist[name].length>200)hist[name]=hist[name].slice(-200);
+  DB.set('merchantHistory',hist);
 }
 function renderMerchants(){
   const list=getMerchants();
@@ -885,42 +1023,61 @@ function editMerchantInfo(name){
   const isOwn=CUR?.role==='merchant'&&CUR?.businessName===name;
   const title=isOwn?`🏪 我的商家資料（${name}）`:`✏️ 編輯商家資料：${name}`;
   const escName=name.replace(/'/g,"\\'");
+  // 商家本人 → 發票抬頭/統編/取貨地點變唯讀；嘗試修改跳警示
+  const lockedForSelf=isOwn?MERCHANT_LOCKED_FIELDS_FOR_SELF:[];
+  const lockAttr=f=>lockedForSelf.includes(f)?`readonly style="background:var(--warm);width:100%;cursor:not-allowed" onclick="notifyLockedField('${f}')" onfocus="this.blur();notifyLockedField('${f}')"`:'style="width:100%"';
+  // 必填標示 *
+  const req=f=>MERCHANT_REQUIRED_FIELDS.includes(f)?'<span style="color:var(--red)"> *</span>':'';
+  // 狀態條（未完成時警示）
+  const status=getMerchantProfileStatus(name);
+  const statusBar=status.complete?`<div style="padding:8px 12px;background:#e8f5ea;border:1px solid #b8d9be;border-radius:6px;font-size:12px;color:var(--green);margin-bottom:12px">✓ 資料已完整</div>`:`<div style="padding:8px 12px;background:#fff4e6;border:1.5px dashed var(--bread);border-radius:6px;font-size:12px;color:var(--bread);margin-bottom:12px">⚠️ 資料未完成（缺：${status.missingFields.map(f=>MERCHANT_FIELD_LABELS[f]).join('、')}）</div>`;
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 26px;width:100%;max-width:680px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="font-weight:800;font-size:18px;color:var(--crust);margin-bottom:4px">${title}</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">資料會同步儲存到 Firebase，所有裝置即時可見</div>
-    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">📝 基本資料</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">資料會同步儲存到 Firebase，所有裝置即時可見 ${isOwn?'<br>商家修改後，好糰管理者會收到通知':''}</div>
+    ${statusBar}
+    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">📝 基本資料 <span style="font-size:11px;color:var(--red);font-weight:400"> *為必填</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">
       <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">商家名稱（系統識別碼，不可改）</label><input class="inp" value="${name}" disabled style="background:var(--warm);width:100%"></div>
-      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">發票抬頭</label><input class="inp" id="mi_title" value="${info.title||''}" placeholder="例：好櫃國際有限公司" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">統一編號</label><input class="inp" id="mi_taxId" value="${info.taxId||''}" maxlength="8" placeholder="8 位數字" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">聯絡電話</label><input class="inp" id="mi_contactPhone" value="${info.contactPhone||''}" style="width:100%"></div>
-      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">取貨地點</label><input class="inp" id="mi_pickupAddr" value="${info.pickupAddr||''}" placeholder="配送司機到這個地址取貨" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">聯絡人姓名</label><input class="inp" id="mi_contactName" value="${info.contactName||''}" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">聯絡 Email</label><input class="inp" id="mi_contactEmail" value="${info.contactEmail||''}" style="width:100%"></div>
+      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">發票抬頭${req('title')}${isOwn?' <span style="color:var(--muted)">🔒</span>':''}</label><input class="inp" id="mi_title" value="${(info.title||'').replace(/"/g,'&quot;')}" placeholder="例：好櫃國際有限公司" ${lockAttr('title')}></div>
+      <div><label style="font-size:11px;color:var(--muted)">統一編號${req('taxId')}${isOwn?' <span style="color:var(--muted)">🔒</span>':''}</label><input class="inp" id="mi_taxId" value="${(info.taxId||'').replace(/"/g,'&quot;')}" maxlength="8" placeholder="8 位數字" ${lockAttr('taxId')}></div>
+      <div><label style="font-size:11px;color:var(--muted)">聯絡電話${req('contactPhone')}</label><input class="inp" id="mi_contactPhone" value="${(info.contactPhone||'').replace(/"/g,'&quot;')}" style="width:100%"></div>
+      <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--muted)">取貨地點${req('pickupAddr')}${isOwn?' <span style="color:var(--muted)">🔒</span>':''}</label><input class="inp" id="mi_pickupAddr" value="${(info.pickupAddr||'').replace(/"/g,'&quot;')}" placeholder="配送司機到這個地址取貨" ${lockAttr('pickupAddr')}></div>
+      <div><label style="font-size:11px;color:var(--muted)">聯絡人姓名${req('contactName')}</label><input class="inp" id="mi_contactName" value="${(info.contactName||'').replace(/"/g,'&quot;')}" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">聯絡 Email${req('contactEmail')}</label><input class="inp" id="mi_contactEmail" value="${(info.contactEmail||'').replace(/"/g,'&quot;')}" style="width:100%"></div>
     </div>
-    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">💰 撥款資料</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-      <div><label style="font-size:11px;color:var(--muted)">銀行</label><input class="inp" id="mi_bankName" value="${info.bankName||''}" placeholder="例：玉山銀行" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">分行</label><input class="inp" id="mi_bankBranch" value="${info.bankBranch||''}" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">帳號</label><input class="inp" id="mi_bankAccount" value="${info.bankAccount||''}" style="width:100%"></div>
-      <div><label style="font-size:11px;color:var(--muted)">戶名</label><input class="inp" id="mi_accountHolder" value="${info.accountHolder||''}" style="width:100%"></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">📅 每月最後一日前修改，次月生效。</div>
+    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">💰 撥款資料 <span style="font-size:11px;color:var(--red);font-weight:400"> *為必填</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">
+      <div><label style="font-size:11px;color:var(--muted)">銀行${req('bankName')}</label><input class="inp" id="mi_bankName" value="${(info.bankName||'').replace(/"/g,'&quot;')}" placeholder="例：玉山銀行" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">分行${req('bankBranch')}</label><input class="inp" id="mi_bankBranch" value="${(info.bankBranch||'').replace(/"/g,'&quot;')}" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">帳號${req('bankAccount')}</label><input class="inp" id="mi_bankAccount" value="${(info.bankAccount||'').replace(/"/g,'&quot;')}" style="width:100%"></div>
+      <div><label style="font-size:11px;color:var(--muted)">戶名${req('accountHolder')}</label><input class="inp" id="mi_accountHolder" value="${(info.accountHolder||'').replace(/"/g,'&quot;')}" style="width:100%"></div>
       <div style="grid-column:1/-1">
-        <label style="font-size:11px;color:var(--muted)">存摺／帳簿影本（圖片或 PDF，供撥款核對）</label>
+        <label style="font-size:11px;color:var(--muted)">存摺／帳簿影本（圖片或 PDF，供撥款核對）${req('passbookImage')}</label>
         <div style="display:flex;gap:10px;align-items:flex-start;margin-top:4px;flex-wrap:wrap">
           <div id="mi_passbookPreview" style="min-width:140px;min-height:90px;border:1.5px dashed #ccc;border-radius:6px;padding:8px;display:flex;align-items:center;justify-content:center;background:var(--light);font-size:11px;color:var(--muted)"></div>
           <div><input type="file" id="mi_passbookFile" accept="image/*,application/pdf" style="font-size:12px" onchange="handleMerchantPassbook(this)"><div id="mi_passbookHint" style="margin-top:6px"></div></div>
         </div>
       </div>
     </div>
-    <div style="margin-bottom:16px"><label style="font-size:11px;color:var(--muted)">備註</label><textarea class="inp" id="mi_notes" rows="2" style="width:100%;resize:vertical">${info.notes||''}</textarea></div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">📅 撥款日前 5 個工作天修改，適用本次撥款。</div>
+    <div style="margin-bottom:16px"><label style="font-size:11px;color:var(--muted)">備註</label><textarea class="inp" id="mi_notes" rows="2" style="width:100%;resize:vertical">${(info.notes||'').replace(/</g,'&lt;')}</textarea></div>
     ${info.updatedAt?`<div style="font-size:11px;color:var(--muted);margin-bottom:12px">最後更新：${info.updatedAt}${info.updatedBy?' by '+info.updatedBy:''}</div>`:''}
-    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-      <button class="btn btn-ghost" onclick="document.getElementById('merchantEditOverlay').remove();_merchantPassbookPending=null">取消</button>
-      <button class="btn btn-primary" onclick="saveMerchantEditForm('${escName}')">💾 儲存</button>
+    <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center">
+      <div>${isAdmin(CUR?.role)?`<button class="btn btn-ghost btn-sm" onclick="showMerchantHistory('${escName}')" title="查看此商家的修改歷程">📜 修改歷程</button>`:''}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="document.getElementById('merchantEditOverlay').remove();_merchantPassbookPending=null">取消</button>
+        <button class="btn btn-primary" onclick="saveMerchantEditForm('${escName}')">💾 儲存</button>
+      </div>
     </div>
   </div>`;
   document.body.appendChild(ov);
   renderMerchantPassbookPreview();
+}
+// 商家本人點到唯讀欄位時的警示
+function notifyLockedField(f){
+  const lbl=MERCHANT_FIELD_LABELS[f]||f;
+  alert(`此欄位（${lbl}）涉及合約、發票資料，如需修改請聯繫好糰管理者協助。\n\n您可自行修改的欄位：聯絡人姓名、聯絡電話、Email、備註，以及帳簿影本。`);
 }
 function renderMerchantPassbookPreview(){
   const prev=el('mi_passbookPreview'),hint=el('mi_passbookHint');if(!prev)return;
@@ -941,36 +1098,106 @@ function handleMerchantPassbook(inp){
 function clearMerchantPassbook(){_merchantPassbookPending={data:'',fileName:''};const fi=el('mi_passbookFile');if(fi)fi.value='';renderMerchantPassbookPreview()}
 function saveMerchantEditForm(name){
   if(!canEditMerchant(name)){notify('權限不足',true);return}
-  const taxId=el('mi_taxId').value.trim();
+  const isOwn=CUR?.role==='merchant'&&CUR?.businessName===name;
+  const oldInfo=getMerchantInfo(name);
+  // 商家本人：唯讀欄位不採用新值（input readonly 會阻擋，這裡二次保險）
+  const getField=f=>{
+    if(isOwn&&MERCHANT_LOCKED_FIELDS_FOR_SELF.includes(f))return oldInfo[f]||'';
+    return(el('mi_'+f)?.value||'').trim();
+  };
+  const taxId=getField('taxId');
   if(taxId&&!/^\d{8}$/.test(taxId)){notify('統編必須是 8 位數字',true);return}
   const data={
-    title:el('mi_title').value.trim(),taxId,
-    pickupAddr:el('mi_pickupAddr').value.trim(),
-    contactName:el('mi_contactName').value.trim(),
-    contactPhone:el('mi_contactPhone').value.trim(),
-    contactEmail:el('mi_contactEmail').value.trim(),
-    bankName:el('mi_bankName').value.trim(),
-    bankBranch:el('mi_bankBranch').value.trim(),
-    bankAccount:el('mi_bankAccount').value.trim(),
-    accountHolder:el('mi_accountHolder').value.trim(),
+    title:getField('title'),taxId,
+    pickupAddr:getField('pickupAddr'),
+    contactName:getField('contactName'),
+    contactPhone:getField('contactPhone'),
+    contactEmail:getField('contactEmail'),
+    bankName:getField('bankName'),
+    bankBranch:getField('bankBranch'),
+    bankAccount:getField('bankAccount'),
+    accountHolder:getField('accountHolder'),
     passbookImage:_merchantPassbookPending?.data||'',
     passbookFileName:_merchantPassbookPending?.fileName||'',
-    notes:el('mi_notes').value.trim()
+    notes:(el('mi_notes')?.value||'').trim()
   };
+  // 必填驗證（除備註外全必填）
+  const missing=MERCHANT_REQUIRED_FIELDS.filter(f=>!String(data[f]||'').trim());
+  if(missing.length){
+    if(isOwn){
+      // 商家：不擋儲存但明確警示未完成
+      if(!confirm(`以下必填欄位未填：\n${missing.map(f=>'・'+MERCHANT_FIELD_LABELS[f]).join('\n')}\n\n仍要儲存嗎？（商家資料狀態會顯示「資料未完成」）`))return;
+    }else{
+      // 管理者：以 confirm 讓他決定（通常會想填完）
+      if(!confirm(`以下欄位未填：\n${missing.map(f=>'・'+MERCHANT_FIELD_LABELS[f]).join('\n')}\n\n仍要儲存嗎？`))return;
+    }
+  }
+  // 計算 diff（新舊比對）
+  const diff=diffMerchantInfo(oldInfo,data);
+  if(!Object.keys(diff).length){
+    notify('沒有變更，無需儲存');
+    return;
+  }
+  // 寫入資料、歷程
   saveMerchantInfo(name,data);
+  addMerchantHistory(name,diff);
+  // 通知管理者（商家改 或 客服/admin 替商家改都通知）
+  addAdminNotification('merchant_profile_updated',{
+    merchant:name,
+    diff,
+    changedByRole:CUR?.role||''
+  });
   document.getElementById('merchantEditOverlay')?.remove();
   _merchantPassbookPending=null;
-  notify(`✅ 已儲存「${name}」的商家資料`);
-  renderMerchants();renderMerchantSelfCard();
+  // 依角色差異化訊息
+  if(isOwn){
+    notify('✅ 資料已送出更新，系統管理者將同步收到通知');
+  }else{
+    notify(`✅ 已儲存「${name}」的商家資料（已寫入修改歷程 + 通知）`);
+  }
+  renderMerchants();renderMerchantSelfCard();renderNotifBell();
+}
+// 修改歷程 Modal（僅 admin / owner）
+function showMerchantHistory(name){
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以查看歷程',true);return}
+  const hist=(DB.get('merchantHistory',{})||{})[name]||[];
+  document.getElementById('merchantHistOverlay')?.remove();
+  const ov=document.createElement('div');
+  ov.id='merchantHistOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
+  const rows=hist.length?hist.slice().reverse().map((h,i)=>{
+    const changesHtml=Object.entries(h.diff||{}).map(([k,v])=>{
+      const lbl=MERCHANT_FIELD_LABELS[k]||k;
+      const oldV=String(v.old||'（空）').length>60?String(v.old).slice(0,60)+'…':v.old||'（空）';
+      const newV=String(v.new||'（空）').length>60?String(v.new).slice(0,60)+'…':v.new||'（空）';
+      return`<div style="font-size:11px;line-height:1.6;margin-top:2px"><span style="color:var(--muted)">${lbl}：</span><span style="color:#888;text-decoration:line-through">${oldV}</span> → <span style="color:var(--crust);font-weight:600">${newV}</span></div>`;
+    }).join('');
+    const roleLabel={owner:'負責人',admin:'管理者',cs:'客服',merchant:'商家'}[h.byRole]||h.byRole||'';
+    return`<div style="padding:10px 12px;background:var(--light);border:1px solid var(--warm);border-radius:6px;margin-bottom:8px">
+      <div style="font-size:12px;color:var(--crust);font-weight:700;margin-bottom:4px">#${hist.length-i}　${h.at}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">操作人：${h.by}（${roleLabel}）${h.byBusiness?' · '+h.byBusiness:''}${h.byPhone?' · '+h.byPhone:''}</div>
+      ${changesHtml||'<div style="font-size:11px;color:var(--muted)">（無變更細節）</div>'}
+    </div>`;
+  }).join(''):'<div style="padding:30px;text-align:center;color:var(--muted)">尚無修改歷程</div>';
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 24px;width:100%;max-width:640px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="display:flex;align-items:center;margin-bottom:12px">
+      <div style="font-weight:800;font-size:17px;color:var(--crust);flex:1">📜 ${name} · 修改歷程</div>
+      <div style="font-size:11px;color:var(--muted);margin-right:8px">共 ${hist.length} 筆</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('merchantHistOverlay').remove()">關閉</button>
+    </div>
+    <div style="flex:1;overflow-y:auto">${rows}</div>
+  </div>`;
+  document.body.appendChild(ov);
 }
 // 商家自己看：訂單頁最上方顯示「我的商家資料」摘要 + 編輯按鈕
 function renderMerchantSelfCard(){
   const card=el('merchantSelfCard');if(!card)return;
   if(CUR?.role!=='merchant'||!CUR.businessName){card.classList.add('hidden');return}
   const info=getMerchantInfo(CUR.businessName);
-  const filled=hasMerchantProfile(CUR.businessName);
+  const status=getMerchantProfileStatus(CUR.businessName);
   const escName=CUR.businessName.replace(/'/g,"\\'");
-  const warn=filled?'':`<div style="padding:8px 12px;background:#fdf4e3;border:1.5px dashed var(--bread);border-radius:6px;font-size:13px;color:var(--bread);margin-bottom:10px">⚠️ 您的商家資料尚未填寫完整，請先補齊（發票抬頭、取貨地點、撥款資料等）</div>`;
+  const statusBadge=status.complete?'<span style="display:inline-block;padding:2px 8px;background:var(--green);color:#fff;font-size:11px;border-radius:10px;margin-left:8px">✓ 資料已完成</span>':'<span style="display:inline-block;padding:2px 8px;background:var(--red);color:#fff;font-size:11px;border-radius:10px;margin-left:8px">⚠️ 資料未完成</span>';
+  const warn=status.complete?'':`<div style="padding:8px 12px;background:#fdf4e3;border:1.5px dashed var(--bread);border-radius:6px;font-size:13px;color:var(--bread);margin-bottom:10px">⚠️ 您的商家資料尚未完整，缺：${status.missingFields.map(f=>MERCHANT_FIELD_LABELS[f]).join('、')}</div>`;
   const rows=[
     ['發票抬頭',info.title],['統一編號',info.taxId],
     ['取貨地點',info.pickupAddr],['聯絡電話',info.contactPhone],
@@ -980,7 +1207,7 @@ function renderMerchantSelfCard(){
     ['帳簿',info.passbookImage?(info.passbookImage.startsWith('data:application/pdf')?'📄 已上傳 PDF':'🖼️ 已上傳圖片'):''],
   ];
   const filledRows=rows.filter(([_,v])=>v).map(([k,v])=>`<div style="display:flex;gap:8px;font-size:13px"><span style="color:var(--muted);min-width:70px">${k}</span><span style="color:var(--crust);font-weight:500">${v}</span></div>`).join('');
-  card.innerHTML=`<div class="card-title">🏪 我的商家資料 · ${CUR.businessName}</div>
+  card.innerHTML=`<div class="card-title">🏪 我的商家資料 · ${CUR.businessName}${statusBadge}</div>
     ${warn}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;margin-bottom:10px">${filledRows||'<div style="font-size:12px;color:var(--muted)">尚未填寫任何資料</div>'}</div>
     <div class="btn-row" style="margin-top:0"><button class="btn btn-primary btn-sm" onclick="editMerchantInfo('${escName}')">✏️ 編輯商家資料</button></div>`;
@@ -1776,11 +2003,14 @@ function exportAllExcel(){
 }
 // JSON 備份（技術用，可用於完整還原）
 function exportAll(){
-  const data={version:4,exportedAt:new Date().toISOString(),
+  const data={version:5,exportedAt:new Date().toISOString(),
     settings:DB.get('settings',{}),
     batches:DB.get('batches',{}),
     recons:DB.get('recons',{}),
     merchants:DB.get('merchants',[]),
+    merchantsInfo:DB.get('merchantsInfo',{}),
+    merchantHistory:DB.get('merchantHistory',{}),
+    notifications:DB.get('notifications',[]),
     acceptance:DB.get('acceptance',{}),
     users:(DB.get('users',[])).map(u=>({phone:u.phone,role:u.role,password:u.password,nickname:u.nickname,businessName:u.businessName,approved:u.approved,locked:u.locked,lockedAt:u.lockedAt,lockedBy:u.lockedBy,createdAt:u.createdAt}))
   };
@@ -1796,6 +2026,9 @@ function restoreData(inp){
       if(d.batches)DB.set('batches',d.batches);
       if(d.recons)DB.set('recons',d.recons);
       if(d.merchants)DB.set('merchants',d.merchants);
+      if(d.merchantsInfo)DB.set('merchantsInfo',d.merchantsInfo);
+      if(d.merchantHistory)DB.set('merchantHistory',d.merchantHistory);
+      if(d.notifications)DB.set('notifications',d.notifications);
       if(d.acceptance)DB.set('acceptance',d.acceptance);
       if(d.users&&isAdmin(CUR?.role))DB.set('users',d.users);
       loadSettings();renderUsers();showAllBatches();
