@@ -332,7 +332,7 @@ tbody td{padding:8px 11px;vertical-align:top}
         <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(1)" title="填入當月 1-15 日">上半月</button>
         <button class="btn btn-ghost btn-sm" onclick="reconSetHalfMonth(2)" title="填入當月 16-月底">下半月</button>
         <button class="btn btn-ghost btn-sm" onclick="reconClearDateRange()" title="清除日期">清除</button>
-        <button class="btn btn-primary btn-sm" onclick="generateRecon()">🧾 生成對帳單</button>
+        <button class="btn btn-primary btn-sm" onclick="generateRecon()" id="btnGenerateRecon" title="僅管理者可生成">🧾 生成對帳單</button>
         <button class="btn btn-blue btn-sm" onclick="searchRecon()">🔍 查詢</button>
       </div>
       <!-- 第二排：匯入 / 重算（匯出已移到每筆對帳單的 ⬇️下載；送出移到每筆與明細頁） -->
@@ -2193,6 +2193,9 @@ function initReconPage(){
   }
   // 管理者顯示匯出/匯入按鈕，商家隱藏
   el('reconActions').classList.toggle('hidden',CUR?.role==='merchant');
+  // 🔐 生成對帳單按鈕只有 admin/owner 可見
+  const btnGen=el('btnGenerateRecon');
+  if(btnGen)btnGen.classList.toggle('hidden',!isAdmin(CUR?.role));
   el('merchantReconCard').classList.add('hidden');
   el('reconRangeCard').classList.add('hidden');
   el('reconDateFrom').value='';el('reconDateTo').value='';
@@ -2368,6 +2371,8 @@ function searchArchive(){
 }
 // 生成對帳單：把區間內訂單融合成一筆 recon 寫入 recons（歷史紀錄區）
 function generateRecon(){
+  // 🔐 只有管理者（owner/admin）可以生成對帳單
+  if(!isAdmin(CUR?.role)){notify('只有管理者可以生成對帳單',true);return}
   const merchant=el('reconMerchant').value;
   const df=el('reconDateFrom').value,dt=el('reconDateTo').value;
   if(!merchant){notify('請先選擇商家',true);return}
@@ -3009,7 +3014,11 @@ function viewReconDetail(key){
   if(rec.updatedAt)meta.push(`匯入/更新：${rec.updatedAt}${rec.updatedBy?' by '+rec.updatedBy:''}`);
   if(rec.archivedAt)meta.push(`封存：${rec.archivedAt}${rec.archivedBy?' by '+rec.archivedBy:''}`);
   if(meta.length)html+=`<div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.8">${meta.map(m=>'・ '+m).join('<br>')}</div>`;
-  el('reconList').innerHTML=html;
+  // 依當前頁籤塞到對應容器（資料庫查詢頁要塞到 archList）
+  const activeTab=document.querySelector('.tab.active')?.id;
+  const targetEl=(activeTab==='tab-archive')?el('archList'):el('reconList');
+  if(targetEl)targetEl.innerHTML=html;
+  if(targetEl)targetEl.scrollIntoView({behavior:'smooth',block:'start'});
 }
 // 商家端：查詢已完成對帳明細（店家對帳完成 / 發票已開立）
 function viewMerchantReconDetail(key){
