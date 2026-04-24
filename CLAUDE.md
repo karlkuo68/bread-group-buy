@@ -130,6 +130,32 @@ Firebase Realtime DB
   - 修復：三處 CSS 都加 `.stk:last-child{page-break-after:auto;break-after:auto}`
   - 同時加現代 `break-after` 屬性增加跨瀏覽器相容
   - 其餘貼紙生成邏輯完全不動
+- **商家資料 6 大規則（2026-04-24）**
+  - 必填欄位：備註以外全必填，`MERCHANT_REQUIRED_FIELDS` 常數定義
+  - `hasMerchantProfile` / `getMerchantProfileStatus` 判斷完整度
+  - 狀態顯示：✓資料已完成 / ⚠️資料未完成（訂單頁商家卡片 + 設定頁商家列表 + Modal 頂部狀態條）
+  - 商家本人唯讀欄位：發票抬頭、統一編號、取貨地點（`MERCHANT_LOCKED_FIELDS_FOR_SELF`）
+    - input readonly + 灰底 + cursor:not-allowed + 🔒 圖示
+    - onclick/onfocus 觸發 `notifyLockedField` 彈警示：「此欄位涉及合約、發票資料，如需修改請聯繫好糰管理者協助」
+    - 提交時二次保險強制用舊值
+  - 區塊小字：
+    - 基本資料區底下：「📅 每月最後一日前修改，次月生效。」
+    - 撥款資料區底下：「📅 撥款日前 5 個工作天修改，適用本次撥款。」
+  - 通知系統（系統內訊息區）：
+    - DB.notifications (最多 300 筆)
+    - header 🔔 鈴鐺 + 未讀數 badge（admin/cs）
+    - 登入時自動 toast 提示未讀數
+    - 通知面板：每條顯示誰改了什麼商家 + 欄位 diff（舊→新）
+    - 已讀/未讀狀態、逐筆或全部標已讀
+    - 預留 EmailJS 掛鉤：`NOTIFY_EMAIL = believe.in.1061213@gmail.com`
+  - 修改歷程（後台可調閱）：
+    - DB.merchantHistory [商家]: [{at, by, byRole, byPhone, byBusiness, diff}] (最多 200 筆/商家)
+    - Modal 底部「📜 修改歷程」按鈕（admin 可見）
+    - 歷程 Modal 每筆顯示時間 / 操作人 / 角色 / 欄位 diff（刪除線樣式）
+  - 儲存訊息差異化：
+    - 商家：「✅ 資料已送出更新，系統管理者將同步收到通知」
+    - 管理者：「✅ 已儲存『X』的商家資料（已寫入修改歷程 + 通知）」
+  - JSON 備份 v5：新增 merchantsInfo / merchantHistory / notifications
 - **商家詳細資料 + 自我編輯（2026-04-21）**
   - 新資料結構：`DB.merchantsInfo` = `{[商家名]: {title, taxId, pickupAddr, contactName, contactPhone, contactEmail, bankName, bankBranch, bankAccount, accountHolder, passbookImage, passbookFileName, notes, updatedAt, updatedBy}}`
   - 原本的 `merchants` 仍是名稱清單，不動
