@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# 本機備份（用 git 歷史回溯，不靠 .bak）
+*.bak.*
+index.html.bak*
+
+# 雜物資料夾與壓縮檔
+_/
+_.zip
+
+# 部署用本機腳本（含個人路徑/設定）
+push.command
+
+# log
+*.log
+
+# Claude Code worktrees
+.claude/
