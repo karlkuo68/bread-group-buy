@@ -740,9 +740,9 @@ async function initFirebase(){
     Object.keys(_cache).forEach(k=>{if(!d.hasOwnProperty(k))delete _cache[k]});
     Object.assign(_cache,d);
     _markSynced();
-    // Firebase 同步後刷新 UI（避免初次載入時 cache 還沒就緒導致清單空白）
+    // Firebase 同步後重新把 _cache 載回 G + 刷新 UI（修「儲存後重登資料消失」bug）
     if(typeof CUR!=='undefined'&&CUR){
-      try{if(typeof renderMerchants==='function')renderMerchants();}catch(e){console.warn('renderMerchants on sync failed',e)}
+      try{if(typeof loadSettings==='function')loadSettings();}catch(e){console.warn('loadSettings on sync failed',e)}
       try{if(typeof refreshMerchantSelect==='function')refreshMerchantSelect();}catch(e){}
       try{if(typeof populateNewBizSelect==='function')populateNewBizSelect();}catch(e){}
     }
