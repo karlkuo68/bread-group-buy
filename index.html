@@ -1000,7 +1000,8 @@ function editMerchantItems(name){
   const ov=document.createElement('div');
   ov.id='merchantItemsOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
-  const escName=JSON.stringify(name);
+  const esc=String(name).replace(/'/g,"\\'");
+  const escName="'"+esc+"'";
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 26px;width:100%;max-width:680px;box-shadow:0 12px 40px rgba(0,0,0,.25)">
     <div style="font-weight:800;font-size:20px;color:var(--crust);margin-bottom:4px">📦 編輯商品資料：${name}</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.7">為「<strong>${name}</strong>」設定<strong>分裝邏輯</strong>。「品項單位」會直接被系統用來計算每筆訂單該裝幾袋（一袋 = 一張貼紙）。</div>
@@ -1047,7 +1048,8 @@ function editMerchantItems(name){
 function renderMerchantRules(merchantName){
   const c=el('merchantRuleList');if(!c)return;
   const rules=G.merchantItemUnits[merchantName]?.rules||[];
-  c.innerHTML=!rules.length?'<div style="font-size:12px;color:var(--muted);padding:8px;background:var(--soft);border-radius:6px;text-align:center">尚未設定規則（依品項單位順序自然分袋）</div>':rules.map((r,i)=>`<div class="rule-item"><span>🛍️</span>${r.label?`<strong>${r.label}</strong>：`:''}<span style="flex:1">${(r.keywords||[]).join(' ＋ ')}</span><button class="rule-del" onclick="delMerchantRule(${JSON.stringify(merchantName)},${i})">✕</button></div>`).join('');
+  const escM=String(merchantName).replace(/'/g,"\\'");
+  c.innerHTML=!rules.length?'<div style="font-size:12px;color:var(--muted);padding:8px;background:var(--soft);border-radius:6px;text-align:center">尚未設定規則（依品項單位順序自然分袋）</div>':rules.map((r,i)=>`<div class="rule-item"><span>🛍️</span>${r.label?`<strong>${r.label}</strong>：`:''}<span style="flex:1">${(r.keywords||[]).join(' ＋ ')}</span><button class="rule-del" onclick="delMerchantRule('${escM}',${i})">✕</button></div>`).join('');
 }
 function addMerchantRule(merchantName){
   const kw=el('newMerchantRuleKw').value.trim(),lbl=el('newMerchantRuleLbl').value.trim();
@@ -1063,7 +1065,8 @@ function renderMerchantItems(merchantName){
   const c=el('merchantItemsList');if(!c)return;
   const table=G.merchantItemUnits[merchantName]||{bagUnitCap:G.bagUnitCap||8,items:{}};
   const entries=Object.entries(table.items||{});
-  c.innerHTML=!entries.length?'<div style="font-size:12px;color:var(--muted);padding:8px;background:var(--soft);border-radius:6px;text-align:center">尚未設定品項（撿貨時所有品項皆預設 1 單位）<br>點下方「🔄 套用 9 項預設範本」可快速帶入</div>':entries.map(([n,u])=>`<div class="rule-item"><span>📦</span><span style="flex:1;word-break:break-all">${n}</span><span style="color:var(--bread2);font-weight:700;white-space:nowrap">${u} 單位</span><button class="rule-del" onclick="delMerchantItem(${JSON.stringify(merchantName)},${JSON.stringify(n)})">✕</button></div>`).join('');
+  const escM=String(merchantName).replace(/'/g,"\\'");
+  c.innerHTML=!entries.length?'<div style="font-size:12px;color:var(--muted);padding:8px;background:var(--soft);border-radius:6px;text-align:center">尚未設定品項（撿貨時所有品項皆預設 1 單位）<br>點下方「🔄 套用 9 項預設範本」可快速帶入</div>':entries.map(([n,u])=>{const escN=String(n).replace(/'/g,"\\'");return `<div class="rule-item"><span>📦</span><span style="flex:1;word-break:break-all">${n}</span><span style="color:var(--bread2);font-weight:700;white-space:nowrap">${u} 單位</span><button class="rule-del" onclick="delMerchantItem('${escM}','${escN}')">✕</button></div>`}).join('');
 }
 function addMerchantItem(merchantName){
   const n=el('newMerchantItemName').value.trim(),u=+el('newMerchantItemUnits').value||1;
@@ -1379,10 +1382,11 @@ function renderMerchants(){
   if(!list.length){el('merchantList').innerHTML='<div style="font-size:12px;color:var(--muted);padding:6px 0">尚未新增商家</div>';return}
   const canEditAny=isAdmin(CUR?.role)||CUR?.role==='cs';
   el('merchantList').innerHTML=list.map((name,i)=>{
+    const esc=String(name).replace(/'/g,"\\'");
     const ok=hasMerchantProfile(name);
     const tag=ok?`<span class="hi-tag" style="background:var(--green);color:#fff;font-size:10px">✓ 已填</span>`:`<span class="hi-tag" style="background:#fdf4e3;color:var(--bread);font-size:10px">⚠️ 未填</span>`;
-    const editInfoBtn=canEditAny?`<button class="btn btn-ghost btn-sm" onclick="editMerchantInfo(${JSON.stringify(name)})" style="white-space:nowrap;font-size:12px;border:1.5px solid var(--line)">✏️ 編輯商家資料</button>`:'';
-    const editItemsBtn=canEditAny?`<button class="btn btn-primary btn-sm" onclick="editMerchantItems(${JSON.stringify(name)})" style="white-space:nowrap;font-size:12px">📦 編輯商品資料</button>`:'';
+    const editInfoBtn=canEditAny?`<button class="btn btn-ghost btn-sm" onclick="editMerchantInfo('${esc}')" style="white-space:nowrap;font-size:12px;border:1.5px solid var(--line)">✏️ 編輯商家資料</button>`:'';
+    const editItemsBtn=canEditAny?`<button class="btn btn-primary btn-sm" onclick="editMerchantItems('${esc}')" style="white-space:nowrap;font-size:12px">📦 編輯商品資料</button>`:'';
     return`<div class="rule-item" style="flex-wrap:wrap;gap:6px;align-items:center;padding:10px"><span style="font-size:18px">🏪</span><strong style="flex:1;min-width:120px">${name}</strong>${tag}${editInfoBtn}${editItemsBtn}<button class="rule-del" onclick="delMerchant(${i})">✕</button></div>`;
   }).join('');
 }
