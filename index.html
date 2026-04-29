@@ -977,16 +977,18 @@ function calcOrderUnits(items,m){const merchant=m||(items[0]&&items[0].merchant)
 function calcOrderBags(items,m){const merchant=m||(items[0]&&items[0].merchant)||'';const cap=getMerchantUnitTable(merchant).bagUnitCap||8;return Math.max(1,Math.ceil(calcOrderUnits(items,merchant)/cap))}
 function loadSettings(){
   const s=DB.get('settings',{});
-  if(s.bagCap){G.bagCap=s.bagCap;el('bagCap').value=G.bagCap}
+  if(s.bagCap){G.bagCap=s.bagCap;if(el('bagCap'))el('bagCap').value=G.bagCap}
   if(s.bagUnitCap)G.bagUnitCap=s.bagUnitCap;
   if(s.itemUnits&&Object.keys(s.itemUnits).length)G.itemUnits=s.itemUnits;else if(!G.itemUnits||!Object.keys(G.itemUnits).length)G.itemUnits=DEFAULT_ITEM_UNITS();
   G.merchantItemUnits=DB.get('merchantItemUnits',{})||{};
   if(s.rules)G.rules=s.rules;
   if(s.qrBase64)G.qrBase64=s.qrBase64;
-  renderRules();loadQR();renderMerchants();
+  try{if(typeof renderRules==='function')renderRules()}catch(e){}
+  try{if(typeof loadQR==='function')loadQR()}catch(e){}
+  try{if(typeof renderMerchants==='function')renderMerchants()}catch(e){console.warn('renderMerchants failed',e)}
 }
 function saveSettings(){
-  G.bagCap=+el('bagCap').value||8;
+  if(el('bagCap'))G.bagCap=+el('bagCap').value||G.bagCap||8;
   DB.set('settings',{bagCap:G.bagCap,bagUnitCap:G.bagUnitCap,itemUnits:G.itemUnits||{},rules:G.rules,qrBase64:G.qrBase64});
   notify('✅ 設定已儲存');
 }
