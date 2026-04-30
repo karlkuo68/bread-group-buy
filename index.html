@@ -923,11 +923,12 @@ function loadSettings(){
   if(s.bagUnitCap)G.bagUnitCap=s.bagUnitCap;
   if(s.itemUnits&&Object.keys(s.itemUnits).length)G.itemUnits=s.itemUnits;else if(!G.itemUnits||!Object.keys(G.itemUnits).length)G.itemUnits=DEFAULT_ITEM_UNITS();
   G.merchantItemUnits=DB.get('merchantItemUnits',{})||{};
-  // 教學手冊卡片：先讀 DB；空就用預設
+  // 教學手冊卡片：先讀 DB；空（或全 null）就用預設
   const tc=DB.get('tutorialCards',null);
-  if(tc&&Array.isArray(tc)&&tc.length)G.tutorialCards=tc;
-  else if(tc&&typeof tc==='object')G.tutorialCards=Object.values(tc).filter(Boolean);
-  else G.tutorialCards=DEFAULT_TUTORIAL_CARDS();
+  let tcArr=null;
+  if(tc&&Array.isArray(tc))tcArr=tc.filter(Boolean);
+  else if(tc&&typeof tc==='object')tcArr=Object.values(tc).filter(Boolean);
+  G.tutorialCards=(tcArr&&tcArr.length)?tcArr:DEFAULT_TUTORIAL_CARDS();
   if(s.rules)G.rules=s.rules;
   if(s.qrBase64)G.qrBase64=s.qrBase64;
   try{if(typeof renderRules==='function')renderRules()}catch(e){}
@@ -1193,19 +1194,39 @@ function saveTutorialCardEdit(id){
   renderTutorial();
   notify('✅ 章節已儲存');
 }
-// 跳到教學手冊內含關鍵字的章節卡片並高亮
+// 跳到教學手冊內含關鍵字的章節卡片並高亮（多重 fallback）
 function helpJumpToCard(kw){
-  const cards=getTutorialCards();
-  const target=cards.find(c=>(c.title||'').includes(kw));
-  if(!target){notify(`找不到包含「${kw}」的章節`,true);return}
-  const elem=document.querySelector(`#helpCards [data-cid="${target.id}"]`);
-  if(!elem){notify('章節尚未渲染，請稍候',true);return}
-  elem.scrollIntoView({behavior:'smooth',block:'start'});
-  // 短暫高亮提示
-  const old=elem.style.boxShadow;
-  elem.style.transition='box-shadow .25s ease';
-  elem.style.boxShadow='0 0 0 4px var(--bread)';
-  setTimeout(()=>{elem.style.boxShadow=old||''},1500);
+  // Fallback 1: G 沒卡片就用預設
+  let cards=getTutorialCards();
+  if(!cards||!cards.length){
+    if(typeof DEFAULT_TUTORIAL_CARDS==='function'){
+      cards=DEFAULT_TUTORIAL_CARDS();
+      G.tutorialCards=cards;
+    }
+  }
+  // Fallback 2: 先精準比對標題；找不到就用「移除 emoji + 編號」後的純文字比對
+  let target=cards.find(c=>(c.title||'').includes(kw));
+  if(!target){
+    target=cards.find(c=>{
+      const stripped=(c.title||'').replace(/[^一-鿿 a-zA-Z0-9]/g,'').replace(/^\s*\d+\s*/,'').trim();
+      return stripped.includes(kw);
+    });
+  }
+  if(!target){notify(`找不到包含「${kw}」的章節`,true);console.warn('helpJumpToCard 失敗',kw,'cards:',cards.map(c=>c.title));return}
+  // Fallback 3: 確保 helpCards 已渲染
+  const helpCardsEl=el('helpCards');
+  if(!helpCardsEl||!helpCardsEl.children.length){
+    if(typeof renderTutorial==='function')renderTutorial();
+  }
+  setTimeout(()=>{
+    const elem=document.querySelector(`#helpCards [data-cid="${target.id}"]`);
+    if(!elem){notify('章節尚未渲染，請稍候再試',true);return}
+    elem.scrollIntoView({behavior:'smooth',block:'start'});
+    const old=elem.style.boxShadow;
+    elem.style.transition='box-shadow .25s ease';
+    elem.style.boxShadow='0 0 0 4px var(--bread)';
+    setTimeout(()=>{elem.style.boxShadow=old||''},1500);
+  },80);
 }
 function handleQR(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{G.qrBase64=e.target.result;saveSettings();loadQR();notify('✅ QR Code 已上傳')};r.readAsDataURL(f);inp.value=''}
 function clearQR(){G.qrBase64='';saveSettings();loadQR();notify('已清除')}
