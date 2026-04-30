@@ -1221,7 +1221,7 @@ function helpJumpToCard(kw){
   setTimeout(()=>{
     const elem=document.querySelector(`#helpCards [data-cid="${target.id}"]`);
     if(!elem){notify('章節尚未渲染，請稍候再試',true);return}
-    elem.scrollIntoView({behavior:'smooth',block:'start'});
+    elem.scrollIntoView({behavior:'smooth',block:'center'});
     const old=elem.style.boxShadow;
     elem.style.transition='box-shadow .25s ease';
     elem.style.boxShadow='0 0 0 4px var(--bread)';
