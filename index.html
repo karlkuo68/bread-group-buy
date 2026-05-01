@@ -2193,6 +2193,8 @@ function showStickers(items){
 // ═══ PACKING（用單位計算，per-merchant）═══
 function getSugBags(items){
   if(!items||!items.length)return[];
+  // 保險：印貼紙/分裝前強制從 _cache 重讀 merchantItemUnits（避免 G 還沒載入到最新單位設定）
+  try{const fresh=DB.get('merchantItemUnits',null);if(fresh&&typeof fresh==='object'&&Object.keys(fresh).length)G.merchantItemUnits=fresh}catch(e){}
   const merchant=(items[0]&&items[0].merchant)||'';
   const cap=getMerchantBagCap(merchant);
   const rules=getMerchantRules(merchant);
