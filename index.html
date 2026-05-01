@@ -585,12 +585,10 @@ button{font-family:var(--font-sans)}
   <!-- 教學手冊 -->
   <div class="page" id="page-help">
     <style>
-      /* 強制統一所有教學卡片內文格式（覆蓋任何 inline style 差異）*/
-      #helpCards .help-card-body{padding:0!important;margin:0!important;font-size:14px!important;line-height:2!important;color:var(--crust)!important}
-      #helpCards .help-card-body > div,#helpCards .help-card-body > p{padding:0 0 0 24px!important;margin:0 0 8px 0!important;line-height:2!important}
-      #helpCards .help-card-body > ol,#helpCards .help-card-body > ul{padding:0 0 0 24px!important;margin:0 0 8px 0!important;line-height:2!important;list-style-position:outside!important}
-      #helpCards .help-card-body li{padding:0!important;margin:0 0 8px 0!important;line-height:2!important}
-      #helpCards .help-card-body li:last-child{margin-bottom:0!important}
+      /* 強制統一所有教學卡片內文格式 */
+      #helpCards .help-card-body{padding:0!important;margin:0!important;font-size:14px!important;line-height:2!important;color:var(--crust)!important;font-family:var(--font-sans)!important}
+      #helpCards .help-card-body .ht-line{padding-left:24px!important;margin:0 0 6px 0!important;line-height:2!important}
+      #helpCards .help-card-body > p{padding-left:0!important;margin:0 0 8px 0!important;line-height:2!important}
       #helpCards .help-card-body details{margin:8px 0!important}
       #helpCards .help-card-body details > summary{padding:14px 18px!important;line-height:1.6!important}
       #helpCards .help-card-body img{max-width:100%!important;border-radius:8px!important;margin:8px 0!important}
@@ -1092,7 +1090,7 @@ function renderTutorial(){
     return `<div class="card help-tut-card" data-cid="${card.id}" ${isAdminUser?'draggable="true"':''} style="position:relative;${isAdminUser?'cursor:move;':''}">
       ${adminBar}
       <div class="card-title" style="${isAdminUser?'padding-right:170px':''}">${card.title||'(未命名)'}</div>
-      <div class="help-card-body">${((h)=>{h=h.replace(/<div(?![\s>]*style)/gi,'<div style="padding-left:24px;line-height:2"');h=h.replace(/<ol(?![\s>]*style)/gi,'<ol style="padding-left:24px;line-height:2;margin:0"');h=h.replace(/<ul(?![\s>]*style)/gi,'<ul style="padding-left:24px;line-height:2;margin:0"');return h})(card.html||'')}</div>
+      <div class="help-card-body">${normalizeTutHtml(card.html||'')}</div>
     </div>`;
   }).join('');
   if(isAdminUser)bindTutorialDnD();
@@ -1180,6 +1178,27 @@ function editTutorialCard(id){
   </div>
   <style>.tbtn{padding:6px 10px;border:1.5px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-family:var(--font-sans)}.tbtn:hover{background:var(--yellow-soft)}#tutBody:focus{border-color:var(--bread)!important}</style>`;
   document.body.appendChild(ov);
+}
+// 顯示時把所有列表/段落轉成統一格式：每行 = 一個 <div>（含數字或•前綴）
+function normalizeTutHtml(html){
+  if(!html)return'';
+  // <ol><li>...</li></ol> → <div>1. ...</div><div>2. ...</div>...
+  html=html.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi,(m,inner)=>{
+    let n=0;
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi,(_,c)=>{n++;return `<div class="ht-line">${n}. ${c.trim()}</div>`});
+  });
+  // <ul><li>...</li></ul> → <div>• ...</div>
+  html=html.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi,(m,inner)=>{
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi,(_,c)=>`<div class="ht-line">• ${c.trim()}</div>`);
+  });
+  // 把已存在的 div（包括 Ken 編輯儲存後的）也加上 class，讓 CSS 統一接管
+  html=html.replace(/<div(\s|>)/gi,(m,p1)=>`<div class="ht-line"${p1}`);
+  // 清掉 div 自帶的 padding/margin/line-height inline style（CSS 統一接管）
+  html=html.replace(/<div class="ht-line"([^>]*?)style="([^"]*)"/gi,(m,a,s)=>{
+    let c=s.replace(/(?:padding|margin|line-height)[^;]*;?/gi,'').trim();
+    return c?`<div class="ht-line"${a}style="${c}"`:`<div class="ht-line"${a}`;
+  });
+  return html;
 }
 // 編輯前把 <ol>/<ul>/<li> 列表轉成「純文字段落」(讓 1./2./• 也能編輯)
 function tutHtmlToEditable(html){
