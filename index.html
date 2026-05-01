@@ -1079,7 +1079,7 @@ function renderTutorial(){
     return `<div class="card help-tut-card" data-cid="${card.id}" ${isAdminUser?'draggable="true"':''} style="position:relative;${isAdminUser?'cursor:move;':''}">
       ${adminBar}
       <div class="card-title" style="${isAdminUser?'padding-right:170px':''}">${card.title||'(未命名)'}</div>
-      <div class="help-card-body">${((h)=>{h=h.replace(/<div(?![\s>]*style)/gi,'<div style="padding-left:24px"');h=h.replace(/<ol(?![\s>]*style)/gi,'<ol style="padding-left:24px;margin:0"');h=h.replace(/<ul(?![\s>]*style)/gi,'<ul style="padding-left:24px;margin:0"');return h})(card.html||'')}</div>
+      <div class="help-card-body">${((h)=>{h=h.replace(/<div(?![\s>]*style)/gi,'<div style="padding-left:24px;line-height:2"');h=h.replace(/<ol(?![\s>]*style)/gi,'<ol style="padding-left:24px;line-height:2;margin:0"');h=h.replace(/<ul(?![\s>]*style)/gi,'<ul style="padding-left:24px;line-height:2;margin:0"');return h})(card.html||'')}</div>
     </div>`;
   }).join('');
   if(isAdminUser)bindTutorialDnD();
