@@ -584,6 +584,19 @@ button{font-family:var(--font-sans)}
 
   <!-- 教學手冊 -->
   <div class="page" id="page-help">
+    <style>
+      /* 強制統一所有教學卡片內文格式（覆蓋任何 inline style 差異）*/
+      #helpCards .help-card-body{padding:0!important;margin:0!important;font-size:14px!important;line-height:2!important;color:var(--crust)!important}
+      #helpCards .help-card-body > div,#helpCards .help-card-body > p{padding:0 0 0 24px!important;margin:0 0 8px 0!important;line-height:2!important}
+      #helpCards .help-card-body > ol,#helpCards .help-card-body > ul{padding:0 0 0 24px!important;margin:0 0 8px 0!important;line-height:2!important;list-style-position:outside!important}
+      #helpCards .help-card-body li{padding:0!important;margin:0 0 8px 0!important;line-height:2!important}
+      #helpCards .help-card-body li:last-child{margin-bottom:0!important}
+      #helpCards .help-card-body details{margin:8px 0!important}
+      #helpCards .help-card-body details > summary{padding:14px 18px!important;line-height:1.6!important}
+      #helpCards .help-card-body img{max-width:100%!important;border-radius:8px!important;margin:8px 0!important}
+      #helpCards .help-card-body code{background:var(--warm);padding:2px 8px;border-radius:6px;font-size:12px}
+      #helpCards .help-card-body strong{font-weight:700}
+    </style>
     <div class="card" style="background:linear-gradient(135deg,var(--yellow) 0%,var(--yellow-soft) 100%);border:2px solid var(--line);text-align:center;padding:32px 24px">
       <div style="font-family:var(--font-serif);font-size:28px;font-weight:900;color:var(--crust);margin-bottom:8px">店家操作教學</div>
       <div style="color:var(--crust);font-size:14px;font-weight:500;margin-bottom:14px">從登入、訂單、貼紙到對帳，一次看懂</div>
