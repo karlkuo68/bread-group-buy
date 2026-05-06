@@ -1,0 +1,18 @@
+#!/bin/bash
+cd "$(dirname "$0")"
+rm -f .git/HEAD.lock .git/index.lock .git/objects/*/tmp_obj_* 2>/dev/null
+
+# 自動更新 index.html 的 meta version 為當下台北時間（YYYYMMDD-HHMM）
+TIME=$(TZ=Asia/Taipei date +%Y%m%d-%H%M)
+perl -i -pe 's|<meta name="version" content="[^"]*">|<meta name="version" content="'"$TIME"'">|' index.html
+
+git add -A 2>/dev/null
+git diff --cached --quiet && echo "（沒有新改動）" || git commit -m "${1:-update $TIME}"
+git push origin main
+
+echo ""
+echo "=========================================="
+echo "✅ Pushed: $TIME"
+echo "推完了！1-2 分鐘後到線上強制刷新（Cmd+Shift+R）"
+echo "=========================================="
+sleep 5
