@@ -925,7 +925,8 @@ function DEFAULT_ITEM_UNITS(){return{'喜多方塊巧（6入）':3,'可頌（7�
 function getMerchantUnitTable(m){if(m&&G.merchantItemUnits&&G.merchantItemUnits[m]&&Object.keys(G.merchantItemUnits[m].items||{}).length)return G.merchantItemUnits[m];return{bagUnitCap:G.bagUnitCap||8,items:G.itemUnits||{}}}
 function getMerchantRules(m){if(m&&G.merchantItemUnits?.[m]?.rules?.length)return G.merchantItemUnits[m].rules;return G.rules||[]}
 function getMerchantBagCap(m){return getMerchantUnitTable(m).bagUnitCap||8}
-function _normItemName(s){return String(s||'').replace(/（/g,'(').replace(/）/g,')').replace(/\s+/g,'').toLowerCase()}
+const _ITEM_ALIASES=[['可鬆','可頌'],['菠蘿','波蘿'],['土司','吐司'],['餐麵包','餐包'],['歐式麵包','歐包']];
+function _normItemName(s){let r=String(s||'').replace(/（/g,'(').replace(/）/g,')').replace(/\s+/g,'').toLowerCase();for(const[a,b]of _ITEM_ALIASES)r=r.split(a).join(b);return r}
 function getItemUnits(name,m){if(!name)return 1;const t=getMerchantUnitTable(m||'');const items=t.items||{};if(items[name]!==undefined)return +items[name];const nn=_normItemName(name);for(const k of Object.keys(items)){const nk=_normItemName(k);if(nn===nk)return +items[k];if(nn.includes(nk)||nk.includes(nn))return +items[k]}return 1}
 function calcOrderUnits(items,m){const merchant=m||(items[0]&&items[0].merchant)||'';return items.reduce((s,r)=>s+(r.qty||0)*getItemUnits(r.itemName,merchant),0)}
 function calcOrderBags(items,m){const merchant=m||(items[0]&&items[0].merchant)||'';const cap=getMerchantUnitTable(merchant).bagUnitCap||8;return Math.max(1,Math.ceil(calcOrderUnits(items,merchant)/cap))}
