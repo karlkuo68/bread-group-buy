@@ -11,9 +11,16 @@ _.zip
 
 # 部署用本機腳本（含個人路徑/設定）
 push.command
+cleanup-history.command
 
 # log
 *.log
 
 # Claude Code worktrees
 .claude/
+
+# 本機版本備份（不上 GitHub）
+.backups/
+
+# Cowork sandbox FUSE mount 暫存
+.fuse_hidden*
