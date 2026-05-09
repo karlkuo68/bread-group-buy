@@ -346,6 +346,101 @@ git push origin main
 
 ---
 
+## ☁ 雲端列印（快麥雲整合）SOP（2026-05-09 新增）
+
+### 系統架構
+
+```
+商家手機/平板（HTTPS, GitHub Pages）
+    ↓ 點「☁ 雲端列印貼紙」
+    ↓ html2canvas 截圖每張貼紙 → base64 PNG
+    ↓ POST {merchantName, images}
+Firebase Cloud Function: printLabel
+    ↓ 從 RTDB bread/merchantsInfo/<name>/printerSN 查印表機 SN
+    ↓ HMAC-MD5 簽名 + form-urlencoded POST
+快麥雲 API: https://gw.superboss.cc/router
+    ↓ 推送 (4G/WiFi)
+店內快麥標籤印表機（E20W/E31G）→ 自動列印
+```
+
+### 重要檔案
+
+| 檔案 | 作用 |
+|---|---|
+| `firebase.json` | Functions 部署設定（Node 20、自管 CORS）|
+| `.firebaserc` | 預設 project = `bread-group-buy` |
+| `database.rules.json` | RTDB 規則（沿用現有：開放讀寫）|
+| `functions/index.js` | 三支 API：`printLabel` / `refreshKuaimaiToken` / `queryPrinterStatus` |
+| `functions/package.json` | 依賴：firebase-admin / firebase-functions |
+| `setup-cloud-print.command` | 一次性設定（首次部署）|
+| `deploy-functions.command` | 改 functions/ 後重 deploy |
+
+### 第一次部署（Ken 雙擊跑）
+
+1. 升級 Firebase 到 Blaze 方案：https://console.firebase.google.com/project/bread-group-buy/usage/details
+   - Blaze = 按用量計費，每天 100 次列印約一個月 3000 次，**完全在免費額度內**
+   - Cloud Functions 每月免費 200 萬次呼叫
+2. 從快麥開放平台拿 3 組 key：appKey / appSecret / accessToken
+3. **雙擊 `setup-cloud-print.command`** — 會自動：
+   - 檢查/安裝 firebase-tools
+   - firebase login（會開瀏覽器）
+   - 互動式輸入 3 組 key → 寫進 Firebase Secret Manager
+   - 安裝 functions 依賴
+   - deploy
+
+### 設定商家印表機 SN
+
+商家管理者（admin）操作：
+1. 設定 → 商家管理 → 編輯商家資料
+2. 拉到「🖨️ 雲列印設定」區塊
+3. 填入印表機 SN（貼在印表機背面，格式如 `E20W123456789`）
+4. 儲存（會同步到 RTDB `bread/merchantsInfo/<name>/printerSN`）
+
+商家本人（merchant 角色）只能看，不能改 — 灰底唯讀。
+
+### 商家使用雲列印
+
+1. 找到該商家的訂單 → 進詳細頁 / 搜尋頁
+2. 點「☁ 雲端列印貼紙」（黃色按鈕）
+3. 等待截圖（依張數，1 張約 1-2 秒）
+4. POST 到 Cloud Function → 印表機 1-3 秒內自動列印
+5. Toast 顯示「✅ 已送達印表機 (SN: XXX)，N 張貼紙列印中」
+
+### 後續維護
+
+| 情境 | 做法 |
+|---|---|
+| 改 `functions/index.js` | 雙擊 `deploy-functions.command` |
+| accessToken 30 天到期前 | 用 `refreshKuaimaiToken` API 或重跑 setup |
+| 新增商家對應的印表機 | 設定 → 商家管理 → 編輯 → 填 SN（Firestore 不用改）|
+| Debug 印不出來 | 開發者工具看 console + Firebase Console → Functions → Logs |
+| 印表機離線 | 用 `queryPrinterStatus` API 確認 |
+
+### Cloud Function URL
+
+正式：`https://asia-east1-bread-group-buy.cloudfunctions.net/printLabel`
+
+如果 deploy 後 URL 不一樣，**回頭改 `index.html` 裡的 `CLOUD_PRINT_ENDPOINT` 常數**（搜尋「CLOUD_PRINT_ENDPOINT」），改完 push GitHub。
+
+### 安全性
+
+- 三組 key 存 Firebase Secret Manager，**永遠不進 git**
+- CORS allow `https://karlkuo68.github.io`（GitHub Pages 來源）
+- 印表機 SN 存 RTDB，跟著商家資料即時同步
+- maxInstances=10，避免被刷爆
+
+### 故障排除
+
+| 症狀 | 可能原因 | 處理 |
+|---|---|---|
+| 找不到印表機 SN | 商家資料沒填 | 設定頁編輯商家 → 填 SN |
+| 簽名錯誤（code:25）| accessToken 過期 / 簽名 method 不對 | 重新 setup 換 accessToken |
+| 設備不存在 | SN 沒在快麥平台綁定 | 上 https://open.iot.kuaimai.com 確認 |
+| 中文變方塊 | html2canvas 字型沒載完 | 等久一點再點，或檢查 web font CDN |
+| Cloud Function 502 | Blaze 沒升 / 沒部署 | 跑 setup-cloud-print.command |
+
+---
+
 ## Claude 自我提醒（避免搞混）
 
 - 被問「麵包團購」→ **只看這個資料夾**，不要去碰 `好糰團購派單系統/`

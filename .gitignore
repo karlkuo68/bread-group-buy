@@ -12,6 +12,22 @@ _.zip
 # 部署用本機腳本（含個人路徑/設定）
 push.command
 cleanup-history.command
+setup-cloud-print.command
+deploy-functions.command
+register-printer.command
+push-cloud-print.command
+
+# Firebase Functions 本機相依
+functions/node_modules/
+functions/.runtimeconfig.json
+functions/.env
+functions/.env.local
+functions/firebase-debug.log
+functions/firebase-debug.*.log
+
+# Firebase 一般
+firebase-debug.log
+.firebase/
 
 # log
 *.log

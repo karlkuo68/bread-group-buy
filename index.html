@@ -4,10 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260506-2159">
+<meta name="version" content="20260509-1324">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
@@ -109,6 +110,8 @@ body{font-family:var(--font-sans);background:var(--cream);color:var(--crust);min
 .btn-ghost:hover{background:var(--cream)}
 .btn-red{background:var(--red);color:#fff}
 .btn-blue{background:var(--blue);color:#fff}
+.btn-yellow{background:var(--yellow);color:var(--crust);border:1.5px solid var(--yellow-deep)}
+.btn-yellow:hover{background:var(--yellow-deep);color:#fff}
 .btn-sm{padding:6px 12px;font-size:12px}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:var(--shadow-pop)}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
@@ -434,6 +437,7 @@ button{font-family:var(--font-sans)}
         <div class="btn-row" style="margin-top:0">
           <button class="btn btn-blue" onclick="showStickers(G.searchItems)">🏷️ 預覽全部貼紙</button>
           <button class="btn btn-blue btn-sm" onclick="dlPDF(G.searchItems)">⬇️ 全部貼紙 PDF</button>
+          <button class="btn btn-yellow btn-sm" onclick="cloudPrintStickers(G.searchItems)" title="透過快麥雲推送到店內印表機自動列印">☁ 雲端列印貼紙</button>
           <button class="btn btn-green" onclick="showPacking(G.searchItems)">📦 預覽全部分裝表</button>
           <button class="btn btn-green btn-sm" onclick="dlPackExcel(G.searchItems)">⬇️ 全部分裝表 Excel</button>
           <button class="btn btn-dark" onclick="showGrandTotal()">📊 查詢日期總準備量</button>
@@ -1394,6 +1398,7 @@ function getMerchantInfo(name){
     contactName:'',contactPhone:'',contactEmail:'',
     bankName:'',bankBranch:'',bankAccount:'',accountHolder:'',
     passbookImage:'',passbookFileName:'',notes:'',
+    printerSN:'',  // 雲列印：快麥雲印表機序號（選用）
     updatedAt:'',updatedBy:''
   };
   return{...defaults,...(info[name]||{}),name};
@@ -1417,7 +1422,8 @@ const MERCHANT_FIELD_LABELS={
   title:'發票抬頭',taxId:'統一編號',pickupAddr:'取貨地點',
   contactName:'聯絡人姓名',contactPhone:'聯絡電話',contactEmail:'聯絡 Email',
   bankName:'銀行',bankBranch:'分行',bankAccount:'帳號',accountHolder:'戶名',
-  passbookImage:'帳簿/存摺影本',passbookFileName:'帳簿檔名',notes:'備註'
+  passbookImage:'帳簿/存摺影本',passbookFileName:'帳簿檔名',notes:'備註',
+  printerSN:'印表機序號'
 };
 // 回傳 {complete, missingFields:[]}；complete = 所有必填都有值
 function getMerchantProfileStatus(name){
@@ -1610,6 +1616,12 @@ function editMerchantInfo(name){
       </div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">📅 撥款日前 5 個工作天修改，適用本次撥款。</div>
+    <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">🖨️ 雲列印設定 <span style="font-size:11px;color:var(--muted);font-weight:400">（選用，填了才能用「☁ 雲端列印貼紙」按鈕）</span></div>
+    <div style="margin-bottom:6px">
+      <label style="font-size:11px;color:var(--muted)">印表機序號（SN）${isOwn?' <span style="color:var(--muted)">🔒 由好糰管理者設定</span>':''}</label>
+      <input class="inp" id="mi_printerSN" value="${(info.printerSN||'').replace(/"/g,'&quot;')}" placeholder="例：E20W123456789（貼在印表機背面）" ${isOwn?'readonly style="background:var(--warm);width:100%;cursor:not-allowed"':'style="width:100%"'}>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">💡 沒填 SN 也可以用，只是「☁ 雲端列印」按鈕會顯示「未設定印表機」。原本的 PDF 列印不受影響。</div>
     <div style="margin-bottom:16px"><label style="font-size:11px;color:var(--muted)">備註</label><textarea class="inp" id="mi_notes" rows="2" style="width:100%;resize:vertical">${(info.notes||'').replace(/</g,'&lt;')}</textarea></div>
     ${info.updatedAt?`<div style="font-size:11px;color:var(--muted);margin-bottom:12px">最後更新：${info.updatedAt}${info.updatedBy?' by '+info.updatedBy:''}</div>`:''}
     <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center">
@@ -1656,6 +1668,8 @@ function saveMerchantEditForm(name){
   };
   const taxId=getField('taxId');
   if(taxId&&!/^\d{8}$/.test(taxId)){notify('統編必須是 8 位數字',true);return}
+  // 印表機 SN — 商家本人不能改（同 lockedFields 邏輯），用舊值
+  const printerSN=isOwn?(oldInfo.printerSN||''):((el('mi_printerSN')?.value||'').trim());
   const data={
     title:getField('title'),taxId,
     pickupAddr:getField('pickupAddr'),
@@ -1668,7 +1682,8 @@ function saveMerchantEditForm(name){
     accountHolder:getField('accountHolder'),
     passbookImage:_merchantPassbookPending?.data||'',
     passbookFileName:_merchantPassbookPending?.fileName||'',
-    notes:(el('mi_notes')?.value||'').trim()
+    notes:(el('mi_notes')?.value||'').trim(),
+    printerSN
   };
   // 必填驗證（除備註外全必填）
   const missing=MERCHANT_REQUIRED_FIELDS.filter(f=>!String(data[f]||'').trim());
@@ -2111,6 +2126,7 @@ function viewOrder(oid){
     <div class="btn-row">
       <button class="btn btn-blue" onclick="showStickers(G.viewItems)">🏷️ 預覽貼紙</button>
       <button class="btn btn-blue btn-sm" onclick="dlPDF(G.viewItems)">⬇️ 貼紙 PDF</button>
+      <button class="btn btn-yellow btn-sm" onclick="cloudPrintStickers(G.viewItems)" title="透過快麥雲推送到店內印表機自動列印">☁ 雲端列印貼紙</button>
       <button class="btn btn-green" onclick="showPacking(G.viewItems)">📦 預覽分裝表</button>
       <button class="btn btn-green btn-sm" onclick="dlPackExcel(G.viewItems)">⬇️ 分裝表 Excel</button>
       <button class="btn btn-ghost btn-sm" onclick="dlExportItems(G.viewItems,'訂單明細_'+G.viewItems[0].oid+'.xlsx')">⬇️ 明細 Excel</button>
@@ -2421,6 +2437,138 @@ document.addEventListener('DOMContentLoaded',function(){
 </body></html>`);
   win.document.close();
   notify('📄 列印視窗已開啟，請選擇「儲存為 PDF」');
+}
+
+// =============================================================
+// ☁ 雲端列印貼紙（透過快麥雲 API → 商家店內印表機自動印）
+// =============================================================
+// Cloud Function endpoint（Firebase Functions v2 = Cloud Run URL）
+// 2026-05-09 deploy 後拿到的實際 URL（每次重 deploy 不會變）
+const CLOUD_PRINT_ENDPOINT='https://printlabel-irrf2krzba-de.a.run.app';
+
+// 主要入口：對 items 執行雲端列印
+async function cloudPrintStickers(items){
+  if(!items||!items.length){notify('請先搜尋',true);return}
+  if(!CLOUD_PRINT_ENDPOINT){notify('☁ 雲列印尚未設定，請聯繫管理者',true);return}
+
+  // 取目前商家名稱（從第一筆訂單推或從 G.currentMerchant）
+  const merchantName=G.currentMerchant||(items[0]&&items[0].merchant)||'';
+  if(!merchantName){
+    notify('找不到商家名稱，無法判斷要送到哪台印表機',true);
+    return;
+  }
+
+  // 確認商家有設定印表機 SN
+  const info=getMerchantInfo(merchantName);
+  if(!info.printerSN||!info.printerSN.trim()){
+    if(!confirm(`「${merchantName}」尚未設定印表機 SN。\n\n請先到「⚙️ 設定 → 商家管理 → 編輯商家資料 → 🖨️ 雲列印設定」填入印表機序號。\n\n要現在去設定嗎？`)){
+      return;
+    }
+    editMerchantInfo(merchantName);
+    return;
+  }
+
+  const stk=buildStickers(items);
+  if(!stk.length){notify('無資料',true);return}
+
+  showProg(`☁ 正在準備 ${stk.length} 張貼紙圖片…`);
+
+  try{
+    // 1) 在隱藏 div 渲染所有貼紙（用跟 dlPDF 一樣的 HTML 結構）
+    const renderHost=document.createElement('div');
+    renderHost.id='cloudPrintRenderHost';
+    renderHost.style.cssText='position:fixed;left:-9999px;top:0;width:80mm;background:#fff;z-index:-1';
+    renderHost.innerHTML=`<style>
+.stk{width:80mm;height:100mm;border:1.5px solid #333;border-radius:0;overflow:hidden;background:#fff;font-family:'Noto Sans TC',sans-serif;display:flex;flex-direction:column;box-sizing:border-box;margin:0}
+.stk-top{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:2px solid #333;flex-shrink:0}
+.stk-store{font-weight:800;font-size:28px;color:#333;letter-spacing:1px}
+.stk-qr{width:64px;height:64px;object-fit:contain}
+.stk-qr-ph{width:64px;height:64px;border:1.5px dashed #bbb;display:flex;align-items:center;justify-content:center;font-size:11px;color:#aaa;border-radius:3px}
+.stk-fields{padding:4px 10px;font-size:12px;line-height:1.8;border-bottom:1px solid #eee;flex-shrink:0}
+.sf-row{display:flex;gap:4px}.sf-label{color:#888;flex-shrink:0;min-width:52px}.sf-val{color:#333;font-weight:500;word-break:break-all}
+.sf-highlight .sf-val{font-weight:700;font-size:14px}
+.sf-total-row .sf-val{font-weight:700;color:#b5651d}
+.stk-summary{text-align:center;font-size:11px;color:#999;padding:3px 0;border-bottom:1px solid #eee;flex-shrink:0}
+.stk-items{display:grid;grid-template-columns:1fr 1fr;column-gap:3mm;row-gap:0.8mm;padding:2px 8px 6px;flex-shrink:0}
+.stk-items.single-col{grid-template-columns:1fr}
+.stk-item{display:flex;justify-content:space-between;gap:1mm;word-break:keep-all;overflow-wrap:anywhere}
+.name{flex:1;word-break:keep-all;overflow-wrap:anywhere}
+.stk-footer{padding:2px 10px 3px;border-top:1px solid #eee;flex-shrink:0;line-height:1.4}
+.stk-tax{font-size:9.5px;color:#555;font-weight:600;margin-bottom:1px}
+.stk-note{font-size:10px;color:#c55;word-break:break-all}
+.pq{font-family:'DM Mono',monospace;font-size:0.9em;color:#555;white-space:nowrap;text-align:right}
+</style>${stk.map(stkHTML).join('')}`;
+    document.body.appendChild(renderHost);
+
+    // 2) 等字型載入
+    if(document.fonts&&document.fonts.ready){
+      try{await document.fonts.ready}catch(e){/* ignore */}
+    }
+    await new Promise(r=>setTimeout(r,300)); // 多等一下確保 layout
+
+    // 3) html2canvas 逐張截圖
+    if(typeof html2canvas==='undefined'){
+      hideProg();
+      notify('html2canvas 未載入，請重新整理頁面',true);
+      renderHost.remove();
+      return;
+    }
+
+    const stickerEls=renderHost.querySelectorAll('.stk');
+    const images=[];
+    for(let i=0;i<stickerEls.length;i++){
+      showProg(`☁ 截圖第 ${i+1}/${stickerEls.length} 張…`);
+      try{
+        const canvas=await html2canvas(stickerEls[i],{
+          scale:3,        // 放大 3 倍才夠清晰（80mm 寬 → 240mm 等效）
+          backgroundColor:'#ffffff',
+          logging:false,
+          useCORS:true,
+          allowTaint:false
+        });
+        const dataUrl=canvas.toDataURL('image/png');
+        images.push(dataUrl);
+      }catch(e){
+        console.error(`[cloudPrint] sticker ${i+1} render fail:`,e);
+        hideProg();
+        notify(`截圖第 ${i+1} 張時失敗：${e.message||e}`,true);
+        renderHost.remove();
+        return;
+      }
+    }
+    renderHost.remove();
+
+    // 4) POST Cloud Function
+    showProg(`☁ 送往印表機（${images.length} 張）…`);
+    const t0=Date.now();
+    const resp=await fetch(CLOUD_PRINT_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        merchantName,
+        images,
+        debug:false
+      })
+    });
+    const result=await resp.json().catch(()=>({ok:false,error:'回應不是 JSON'}));
+    const elapsedMs=Date.now()-t0;
+
+    hideProg();
+
+    // 5) 結果處理
+    if(result.ok){
+      notify(`✅ 已送達印表機（SN: ${result.sn}），${images.length} 張貼紙列印中（耗時 ${(elapsedMs/1000).toFixed(1)}s）`);
+    }else{
+      const errMsg=result.error||result.errorCode||'未知錯誤';
+      notify(`❌ 雲列印失敗：${errMsg}`,true);
+      console.error('[cloudPrint] failed:',result);
+    }
+  }catch(err){
+    hideProg();
+    console.error('[cloudPrint] error:',err);
+    notify(`❌ 雲列印失敗：${err.message||err}`,true);
+    document.getElementById('cloudPrintRenderHost')?.remove();
+  }
 }
 
 // 分裝表 Excel（4頁工作表）
