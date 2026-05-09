@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260509-1324">
+<meta name="version" content="20260509-2159">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -2442,14 +2442,47 @@ document.addEventListener('DOMContentLoaded',function(){
 // =============================================================
 // ☁ 雲端列印貼紙（透過快麥雲 API → 商家店內印表機自動印）
 // =============================================================
-// Cloud Function endpoint（Firebase Functions v2 = Cloud Run URL）
-// 2026-05-09 deploy 後拿到的實際 URL（每次重 deploy 不會變）
-const CLOUD_PRINT_ENDPOINT='https://printlabel-irrf2krzba-de.a.run.app';
+// 架構：Cloud Function /signRequest 只算簽名（appSecret 不暴露）
+//       前端拿到 { url, body } 後直接 fetch cloud.kuaimai.com
+//       這樣用 Ken 瀏覽器 IP（台灣）打快麥 API，不會被境外 IP 風控擋
+// 用 cloudfunctions.net 域名（穩定的 v1 routing，會自動轉到 v2）
+const CLOUD_SIGN_ENDPOINT='https://asia-east1-bread-group-buy.cloudfunctions.net/signRequest';
+
+// Helper：呼叫 Cloud Function 拿簽名後的 URL+body，再從前端打 cloud.kuaimai.com
+async function _callKuaimaiViaSign(method, params, merchantName){
+  // Step 1: 跟 Cloud Function 拿簽名 + 完整 body
+  const signResp=await fetch(CLOUD_SIGN_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({method,params,merchantName})
+  });
+  const signResult=await signResp.json();
+  if(!signResult.ok){
+    throw new Error('取得簽名失敗：'+(signResult.error||'unknown'));
+  }
+  // Step 2: 直接打 cloud.kuaimai.com（用 Ken 瀏覽器 IP）
+  const apiResp=await fetch(signResult.url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:signResult.body
+  });
+  const apiText=await apiResp.text();
+  let apiJson=null;
+  try{apiJson=JSON.parse(apiText)}catch(e){}
+  return {
+    httpStatus:apiResp.status,
+    json:apiJson,
+    raw:apiText,
+    apiOk:apiJson&&apiJson.status===true,
+    appId:signResult.appId,
+    timestamp:signResult.timestamp
+  };
+}
 
 // 主要入口：對 items 執行雲端列印
 async function cloudPrintStickers(items){
   if(!items||!items.length){notify('請先搜尋',true);return}
-  if(!CLOUD_PRINT_ENDPOINT){notify('☁ 雲列印尚未設定，請聯繫管理者',true);return}
+  if(!CLOUD_SIGN_ENDPOINT){notify('☁ 雲列印尚未設定，請聯繫管理者',true);return}
 
   // 取目前商家名稱（從第一筆訂單推或從 G.currentMerchant）
   const merchantName=G.currentMerchant||(items[0]&&items[0].merchant)||'';
@@ -2506,7 +2539,7 @@ async function cloudPrintStickers(items){
     }
     await new Promise(r=>setTimeout(r,300)); // 多等一下確保 layout
 
-    // 3) html2canvas 逐張截圖
+    // 3) html2canvas 逐張截圖（為了符合快麥 50KB 上限，用較低 scale + JPEG 壓縮）
     if(typeof html2canvas==='undefined'){
       hideProg();
       notify('html2canvas 未載入，請重新整理頁面',true);
@@ -2519,15 +2552,30 @@ async function cloudPrintStickers(items){
     for(let i=0;i<stickerEls.length;i++){
       showProg(`☁ 截圖第 ${i+1}/${stickerEls.length} 張…`);
       try{
+        // scale=2 約等於 印表機 203dpi 規格（80mm × 100mm → ~640×800 px）
         const canvas=await html2canvas(stickerEls[i],{
-          scale:3,        // 放大 3 倍才夠清晰（80mm 寬 → 240mm 等效）
+          scale:2,
           backgroundColor:'#ffffff',
           logging:false,
           useCORS:true,
           allowTaint:false
         });
-        const dataUrl=canvas.toDataURL('image/png');
-        images.push(dataUrl);
+        // 用 JPEG 壓縮（黑白貼紙，JPEG quality 0.85 約 30-45KB）
+        // 如果過大會自動降 quality 重新壓
+        let dataUrl=canvas.toDataURL('image/jpeg',0.85);
+        let bytes=Math.round((dataUrl.length-22)*0.75); // 估算 base64 原始大小
+        if(bytes>50000){
+          dataUrl=canvas.toDataURL('image/jpeg',0.7);
+          bytes=Math.round((dataUrl.length-22)*0.75);
+        }
+        if(bytes>50000){
+          dataUrl=canvas.toDataURL('image/jpeg',0.5);
+          bytes=Math.round((dataUrl.length-22)*0.75);
+        }
+        console.log(`[cloudPrint] sticker ${i+1}: ${(bytes/1024).toFixed(1)}KB`);
+        // 移除 data:image/jpeg;base64, 前綴，給後端
+        const cleanBase64=dataUrl.replace(/^data:image\/[a-z]+;base64,/,'');
+        images.push(cleanBase64);
       }catch(e){
         console.error(`[cloudPrint] sticker ${i+1} render fail:`,e);
         hideProg();
@@ -2538,30 +2586,50 @@ async function cloudPrintStickers(items){
     }
     renderHost.remove();
 
-    // 4) POST Cloud Function
-    showProg(`☁ 送往印表機（${images.length} 張）…`);
+    // 4) 把每張貼紙包成 tsplXmlWrite 的 XML 格式，逐張送印
+    // 文檔說 jobs 陣列最多 20 張，但圖片每張 50KB，一次送 20 張會超過總大小限制
+    // 改成逐張送印，比較安全
     const t0=Date.now();
-    const resp=await fetch(CLOUD_PRINT_ENDPOINT,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        merchantName,
-        images,
-        debug:false
-      })
-    });
-    const result=await resp.json().catch(()=>({ok:false,error:'回應不是 JSON'}));
+    const labelWidth=75,labelHeight=100; // mm
+    const allJobIds=[];
+    const failures=[];
+    for(let i=0;i<images.length;i++){
+      showProg(`☁ 送往印表機（${i+1}/${images.length}）…`);
+      const xmlStr=`<page><render width='${labelWidth}' height='${labelHeight}'><img x='1' y='1'>${images[i]}</img></render></page>`;
+      try{
+        const result=await _callKuaimaiViaSign('tsplXmlWrite',{
+          sn:info.printerSN.trim(),
+          xmlStr,
+          printTimes:1
+        },merchantName);
+        if(result.apiOk){
+          const jobIds=result.json?.data?.jobIds||[];
+          allJobIds.push(...jobIds);
+        }else{
+          const errMsg=result.json?.message||result.json?.exceptionMessage||result.raw;
+          const errCode=result.json?.code;
+          failures.push({i:i+1,errMsg,errCode});
+          console.error(`[cloudPrint] sticker ${i+1} fail:`,result);
+          // 第一張失敗就停（避免連續失敗）
+          break;
+        }
+      }catch(e){
+        failures.push({i:i+1,errMsg:String(e.message||e)});
+        console.error(`[cloudPrint] sticker ${i+1} exception:`,e);
+        break;
+      }
+    }
     const elapsedMs=Date.now()-t0;
 
     hideProg();
 
     // 5) 結果處理
-    if(result.ok){
-      notify(`✅ 已送達印表機（SN: ${result.sn}），${images.length} 張貼紙列印中（耗時 ${(elapsedMs/1000).toFixed(1)}s）`);
+    if(failures.length===0){
+      const jobInfo=allJobIds.length?` (jobs: ${allJobIds.slice(0,3).join(',')}${allJobIds.length>3?'...':''})`:'';
+      notify(`✅ 已送達印表機（SN: ${info.printerSN}），${images.length} 張貼紙列印中（耗時 ${(elapsedMs/1000).toFixed(1)}s）${jobInfo}`);
     }else{
-      const errMsg=result.error||result.errorCode||'未知錯誤';
-      notify(`❌ 雲列印失敗：${errMsg}`,true);
-      console.error('[cloudPrint] failed:',result);
+      const f=failures[0];
+      notify(`❌ 第 ${f.i} 張失敗：${f.errMsg}${f.errCode?' (code:'+f.errCode+')':''}`,true);
     }
   }catch(err){
     hideProg();

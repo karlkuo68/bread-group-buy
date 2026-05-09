@@ -16,6 +16,9 @@ setup-cloud-print.command
 deploy-functions.command
 register-printer.command
 push-cloud-print.command
+test-printer-status.command
+probe-cloud-endpoint.command
+bind-device.command
 
 # Firebase Functions 本機相依
 functions/node_modules/
