@@ -130,8 +130,9 @@ exports.signRequest = onRequest(
         if (sn) finalParams.sn = sn;
       }
 
-      const appKey = KUAIMAI_APP_KEY.value();
-      const appSecret = KUAIMAI_APP_SECRET.value();
+      // .trim() 是必要的：setup-cloud-print.command 用 echo 寫 secret 時帶了 \n
+      const appKey = KUAIMAI_APP_KEY.value().trim();
+      const appSecret = KUAIMAI_APP_SECRET.value().trim();
       const timestamp = getTaipeiTimestamp();
 
       const allParams = {

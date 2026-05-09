@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260509-2159">
+<meta name="version" content="20260509-2231">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -372,6 +372,7 @@ button{font-family:var(--font-sans)}
     <div class="tab" onclick="switchTab('recon')" id="tab-recon">💰 對帳作業</div>
     <div class="tab" onclick="switchTab('archive')" id="tab-archive">📚 資料庫查詢</div>
     <div class="tab" onclick="switchTab('settings')" id="tab-settings">⚙️ 設定</div>
+    <div class="tab" onclick="switchTab('printerMgmt')" id="tab-printerMgmt" style="display:none">🖨️ 印表機</div>
     <div class="tab" onclick="switchTab('help')" id="tab-help">📖 教學手冊</div>
   </div>
 
@@ -586,6 +587,177 @@ button{font-family:var(--font-sans)}
     </div>
   </div>
 
+  <!-- 印表機管理（admin/owner only） -->
+  <div class="page" id="page-printerMgmt">
+    <div class="card" style="background:linear-gradient(135deg,#FFF8EA 0%,#FBEFD2 100%);border-color:var(--bread)">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:var(--crust);margin-bottom:4px">🖨️ 印表機管理</div>
+          <div style="font-size:13px;color:var(--muted)">所有商家雲列印設備的即時狀態 + 安裝教學 + 故障排除</div>
+        </div>
+        <button class="btn btn-primary" onclick="refreshAllPrinterStatus()" id="pmRefreshBtn">🔄 刷新全部狀態</button>
+      </div>
+    </div>
+
+    <!-- 設備狀態列表 -->
+    <div class="card">
+      <div class="card-title">📡 設備即時狀態</div>
+      <div id="pmDeviceList" style="display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
+        <div style="text-align:center;padding:30px;color:var(--muted)">點上方「🔄 刷新」載入</div>
+      </div>
+    </div>
+
+    <!-- 列印歷史 log -->
+    <div class="card">
+      <div class="card-title">📋 列印歷史（最近 50 筆）</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <select id="pmLogFilter" class="inp" style="width:auto;min-width:140px" onchange="renderPrintHistory()">
+          <option value="all">全部商家</option>
+        </select>
+        <select id="pmLogStatus" class="inp" style="width:auto;min-width:140px" onchange="renderPrintHistory()">
+          <option value="all">全部狀態</option>
+          <option value="success">✅ 成功</option>
+          <option value="error">❌ 失敗</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="renderPrintHistory()">🔄 重整</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportPrintLogExcel()">⬇️ 匯出 Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearOldPrintLog()" style="color:var(--red)">🗑️ 清除 30 天前</button>
+      </div>
+      <div id="pmLogTable" class="tbl-wrap"></div>
+    </div>
+
+    <!-- 安裝教學（可摺疊） -->
+    <div class="card">
+      <div class="card-title" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="togglePm('pmTutorial')">
+        <span>📚 安裝教學（給安裝人員看）</span>
+        <span id="pmTutorial-toggle" style="font-size:14px;color:var(--muted)">▼ 點此展開</span>
+      </div>
+      <div id="pmTutorial" style="display:none;margin-top:12px">
+        <div style="background:var(--cream);border-left:4px solid var(--bread);padding:12px 16px;border-radius:6px;margin-bottom:14px">
+          <strong style="color:var(--crust)">📦 安裝前準備物品清單</strong>
+          <ul style="margin:8px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
+            <li>快麥雲熱敏標籤印表機（型號 E31W / E41W / E20W 等）</li>
+            <li>原廠變壓器（24V 1.5A）</li>
+            <li>感熱貼紙紙捲（80mm × 100mm 規格）</li>
+            <li>店家無線網路 SSID + 密碼（必須是 <strong>2.4GHz</strong>，不能 5GHz）</li>
+            <li>商家手機（iOS / Android 都行，下載「快麥雲打印」App）</li>
+          </ul>
+        </div>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 1 步：開機</div>
+        <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
+          <li>把變壓器插到印表機背面（圓孔），另一頭插牆上插座</li>
+          <li>打開印表機側邊電源鍵</li>
+          <li>機器發出「嗶」聲 + 紅燈閃爍 = 開機成功</li>
+        </ol>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 2 步：安裝紙捲</div>
+        <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
+          <li>按印表機上方按鈕打開蓋子</li>
+          <li>放入紙捲，紙頭朝外（光滑面朝上）</li>
+          <li>把紙頭拉出 5cm，蓋上蓋子聽到「喀」一聲</li>
+          <li>按 FEED 鍵測試出紙</li>
+        </ol>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 3 步：配網（連 WiFi）— 三選一</div>
+        <div style="background:#fff3e0;border:1px dashed var(--bread);padding:12px 16px;border-radius:6px;margin:8px 0">
+          <strong style="color:var(--bread)">⚡ 方式 A（最簡單）：手機 App 配網</strong>
+          <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
+            <li>App Store / Google Play 搜尋「<strong>快麥云打印</strong>」（簡體字）下載安裝</li>
+            <li>打開 App → 註冊或登入快麥帳號</li>
+            <li>點「設備管理 → 添加設備 → 掃碼」</li>
+            <li>對準印表機背面 QR Code 掃描</li>
+            <li>輸入店家 WiFi 名稱 + 密碼（注意：必須 <strong>2.4GHz</strong>）</li>
+            <li>等待 30 秒，設備管理頁面顯示「在線」 = 成功 ✅</li>
+          </ol>
+        </div>
+        <div style="background:#e3f2fd;border:1px dashed var(--blue);padding:12px 16px;border-radius:6px;margin:8px 0">
+          <strong style="color:var(--blue)">💻 方式 B：電腦軟體配網（USB 線）</strong>
+          <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
+            <li>下載「快麥標籤管家」<a href="https://dyj.kuaimai.com/" target="_blank">https://dyj.kuaimai.com/</a></li>
+            <li>USB 線連印表機 + 電腦</li>
+            <li>軟體偵測到設備 → 設定頁面填 WiFi 帳密</li>
+            <li>配完拔 USB，印表機自動切 WiFi</li>
+          </ol>
+        </div>
+        <div style="background:#fce4ec;border:1px dashed #c2185b;padding:12px 16px;border-radius:6px;margin:8px 0">
+          <strong style="color:#c2185b">📡 方式 C：AP 模式（不裝 App、沒 USB 線）</strong>
+          <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
+            <li>長按印表機 FEED 鍵 5 秒（聽到嗶聲）→ 進入 AP 模式</li>
+            <li>手機 / 電腦的 WiFi 列表會出現「Kuaimai_XXXX」連上</li>
+            <li>瀏覽器自動跳出網頁（或手動開 192.168.4.1）</li>
+            <li>填店家 WiFi 帳密 → 印表機自動切過去</li>
+          </ol>
+        </div>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 4 步：取得設備 SN（序號）</div>
+        <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
+          <li>翻到印表機底部，找一張白色貼紙</li>
+          <li>「序列號」那行 = SN，格式像 <code style="background:var(--cream);padding:2px 6px;border-radius:3px">KME31W25160294</code></li>
+          <li>抄下來（或拍照）</li>
+        </ol>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 5 步：設定到麵包系統商家</div>
+        <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
+          <li>登入麵包系統 → 設定 → 商家管理</li>
+          <li>找到對應商家 → 點「✏️ 編輯商家資料」</li>
+          <li>拉到底，「🖨️ 雲列印設定」區塊</li>
+          <li>填印表機序號 SN → 儲存</li>
+        </ol>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 6 步：測試列印</div>
+        <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
+          <li>回到本頁「📡 設備即時狀態」</li>
+          <li>點「🔄 刷新全部狀態」確認該商家顯示「🟢 在線 ✓正常」</li>
+          <li>點該商家卡片的「🧪 測試列印」</li>
+          <li>1-3 秒後印表機應該自動吐一張「✅ 測試貼紙」</li>
+          <li>成功 → 安裝完成 🎉</li>
+        </ol>
+
+        <div style="background:var(--cream);border-radius:6px;padding:14px;margin-top:16px">
+          <strong style="color:var(--crust)">📞 安裝過程遇到問題</strong><br>
+          <div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7">
+            • 快麥技術支持微信：<strong>18621377135</strong> / <strong>18969120021</strong>（手機/微信同號）<br>
+            • 工作時間：每天 9:00 - 21:00<br>
+            • 售後熱線：400-007-5533
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 故障排除（可摺疊） -->
+    <div class="card">
+      <div class="card-title" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="togglePm('pmTrouble')">
+        <span>🔧 故障排除</span>
+        <span id="pmTrouble-toggle" style="font-size:14px;color:var(--muted)">▼ 點此展開</span>
+      </div>
+      <div id="pmTrouble" style="display:none;margin-top:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:var(--cream)">
+              <th style="padding:8px;text-align:left;border:1px solid var(--line)">症狀</th>
+              <th style="padding:8px;text-align:left;border:1px solid var(--line)">可能原因</th>
+              <th style="padding:8px;text-align:left;border:1px solid var(--line)">處理方式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding:8px;border:1px solid var(--line)">設備狀態顯示「離線」</td><td style="padding:8px;border:1px solid var(--line)">沒插電 / WiFi 斷</td><td style="padding:8px;border:1px solid var(--line)">檢查電源、WiFi、重新配網</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">點雲列印按鈕沒反應</td><td style="padding:8px;border:1px solid var(--line)">瀏覽器 cache 問題</td><td style="padding:8px;border:1px solid var(--line)">強制刷新（Cmd+Shift+R）/ 換無痕模式</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">列印失敗：4001</td><td style="padding:8px;border:1px solid var(--line)">SN 錯誤或設備未激活</td><td style="padding:8px;border:1px solid var(--line)">確認 SN 與機底貼紙一致；確認設備在線</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">列印失敗：4005</td><td style="padding:8px;border:1px solid var(--line)">設備離線</td><td style="padding:8px;border:1px solid var(--line)">WiFi 確認；4G 機型確認開機</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">列印失敗：4015</td><td style="padding:8px;border:1px solid var(--line)">簽名錯誤</td><td style="padding:8px;border:1px solid var(--line)">通知技術人員（Cloud Function 問題）</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">列印失敗：6018</td><td style="padding:8px;border:1px solid var(--line)">圖片過大（&gt;50KB）</td><td style="padding:8px;border:1px solid var(--line)">通知技術人員調降貼紙圖片解析度</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">列印失敗：6027</td><td style="padding:8px;border:1px solid var(--line)">頻率過高被限流</td><td style="padding:8px;border:1px solid var(--line)">等 1 分鐘後重試</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">中文變方塊</td><td style="padding:8px;border:1px solid var(--line)">字型沒載完就截圖</td><td style="padding:8px;border:1px solid var(--line)">等 5 秒後再點「☁ 雲端列印」</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">設備狀態：缺紙</td><td style="padding:8px;border:1px solid var(--line)">紙捲用完</td><td style="padding:8px;border:1px solid var(--line)">換新紙捲，按 FEED 鍵測試</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">設備狀態：開蓋</td><td style="padding:8px;border:1px solid var(--line)">蓋子沒蓋緊</td><td style="padding:8px;border:1px solid var(--line)">用力壓上蓋直到「喀」聲</td></tr>
+            <tr><td style="padding:8px;border:1px solid var(--line)">設備狀態：粘紙</td><td style="padding:8px;border:1px solid var(--line)">紙卡住</td><td style="padding:8px;border:1px solid var(--line)">打開蓋子，慢慢拉出卡紙，重新裝紙</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- 教學手冊 -->
   <div class="page" id="page-help">
     <style>
@@ -767,6 +939,8 @@ function enterApp(){
   const isMerchant=CUR.role==='merchant';
   el('tab-import').classList.toggle('hidden',isMerchant);
   el('tab-settings').classList.toggle('hidden',isMerchant);
+  // 印表機管理：只有 admin/owner 看得到
+  el('tab-printerMgmt').style.display=isAdmin(CUR.role)?'':'none';
   if(isMerchant){switchTab('orders')}
   loadSettings();renderUsers();refreshMerchantSelect();populateNewBizSelect();showAllBatches();
   renderMerchantSelfCard();renderNotifBell();
@@ -1289,7 +1463,8 @@ function loadQR(){el('qrPreview').innerHTML=G.qrBase64?`<img class="qr-preview-i
 
 // ═══ UI ═══
 function switchTab(id){
-  if(CUR?.role==='merchant'&&(id==='import'||id==='settings')){notify('此功能僅限管理者與客服人員',true);return}
+  if(CUR?.role==='merchant'&&(id==='import'||id==='settings'||id==='printerMgmt')){notify('此功能僅限管理者與客服人員',true);return}
+  if(id==='printerMgmt'&&!isAdmin(CUR?.role)){notify('此功能僅限管理者',true);return}
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   el('tab-'+id).classList.add('active');el('page-'+id).classList.add('active');
@@ -1297,6 +1472,7 @@ function switchTab(id){
   if(id==='import'){refreshMerchantSelect()}
   if(id==='recon'){initReconPage()}
   if(id==='archive'){initArchivePage()}
+  if(id==='printerMgmt'){initPrinterMgmtPage()}
 }
 function notify(msg,err=false){const n=el('notif');n.textContent=msg;n.className='notif'+(err?' err':'');clearTimeout(n._t);setTimeout(()=>n.classList.add('show'),10);n._t=setTimeout(()=>n.classList.remove('show'),3200)}
 function showProg(t){el('prog-text').textContent=t;el('prog').style.display='block'}
@@ -2623,13 +2799,16 @@ async function cloudPrintStickers(items){
 
     hideProg();
 
-    // 5) 結果處理
+    // 5) 結果處理 + 寫 log
     if(failures.length===0){
       const jobInfo=allJobIds.length?` (jobs: ${allJobIds.slice(0,3).join(',')}${allJobIds.length>3?'...':''})`:'';
       notify(`✅ 已送達印表機（SN: ${info.printerSN}），${images.length} 張貼紙列印中（耗時 ${(elapsedMs/1000).toFixed(1)}s）${jobInfo}`);
+      logPrintJob(merchantName,info.printerSN,'success','sticker',allJobIds,null,elapsedMs);
     }else{
       const f=failures[0];
-      notify(`❌ 第 ${f.i} 張失敗：${f.errMsg}${f.errCode?' (code:'+f.errCode+')':''}`,true);
+      const errFull=`第 ${f.i} 張失敗：${f.errMsg}${f.errCode?' (code:'+f.errCode+')':''}`;
+      notify(`❌ ${errFull}`,true);
+      logPrintJob(merchantName,info.printerSN,'error','sticker',allJobIds,errFull,elapsedMs);
     }
   }catch(err){
     hideProg();
@@ -2637,6 +2816,293 @@ async function cloudPrintStickers(items){
     notify(`❌ 雲列印失敗：${err.message||err}`,true);
     document.getElementById('cloudPrintRenderHost')?.remove();
   }
+}
+
+// =============================================================
+// 🖨️ 印表機管理頁
+// =============================================================
+const PM_STATE={lastStatus:{},lastRefreshAt:0};
+
+// 進頁面時呼叫
+function initPrinterMgmtPage(){
+  refreshAllPrinterStatus();
+  populatePrintLogFilter();
+  renderPrintHistory();
+}
+
+function togglePm(id){
+  const target=el(id);
+  const toggle=el(id+'-toggle');
+  if(target.style.display==='none'){
+    target.style.display='block';
+    if(toggle)toggle.textContent='▲ 點此收合';
+  }else{
+    target.style.display='none';
+    if(toggle)toggle.textContent='▼ 點此展開';
+  }
+}
+
+// 撈所有商家的印表機 SN，呼叫 batchStatus 一次性查
+async function refreshAllPrinterStatus(){
+  const btn=el('pmRefreshBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ 查詢中…'}
+  try{
+    const merchants=getMerchants();
+    const merchantsInfo=DB.get('merchantsInfo',{})||{};
+    // 收集所有有 SN 的商家
+    const withSN=[],withoutSN=[];
+    for(const name of merchants){
+      const info=merchantsInfo[name]||{};
+      const sn=(info.printerSN||'').trim();
+      if(sn)withSN.push({name,sn,deviceKey:info.printerDeviceKey||'',model:info.printerModel||'',contactPhone:info.contactPhone||''});
+      else withoutSN.push({name});
+    }
+
+    let statusMap={};
+    if(withSN.length>0){
+      const snsArr=withSN.map(x=>x.sn);
+      const result=await _callKuaimaiViaSign('batchStatus',{snsStr:JSON.stringify(snsArr)});
+      if(result.apiOk){
+        const data=result.json?.data||[];
+        for(const item of data){
+          statusMap[item.sn]=item;
+        }
+      }else{
+        notify(`查詢狀態失敗：${result.json?.message||result.raw||'未知錯誤'}`,true);
+      }
+    }
+    PM_STATE.lastStatus=statusMap;
+    PM_STATE.lastRefreshAt=Date.now();
+    renderPrinterCards(withSN,withoutSN,statusMap);
+  }catch(err){
+    notify(`查詢失敗：${err.message||err}`,true);
+    console.error('[pm] refresh error:',err);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🔄 刷新全部狀態'}
+  }
+}
+
+function renderPrinterCards(withSN,withoutSN,statusMap){
+  const host=el('pmDeviceList');
+  if(!host)return;
+  const STATUS_LABELS={ONLINE:'🟢 在線',OFFLINE:'🔴 離線',UNACTIVE:'⚫ 未激活',DISABLE:'🚫 已禁用'};
+  const DEVICE_STATUS_LABELS={0:'✓ 正常',1:'⚠️ 開蓋',2:'⚠️ 粘紙',3:'⚠️ 缺紙'};
+  const DEVICE_STATUS_COLOR={0:'var(--green)',1:'var(--bread)',2:'var(--bread)',3:'var(--red)'};
+
+  const cards=[];
+  // 有設定 SN 的商家
+  for(const m of withSN){
+    const status=statusMap[m.sn];
+    let statusBadge='⚫ 未知',deviceBadge='—',badgeColor='var(--muted)';
+    if(status){
+      statusBadge=STATUS_LABELS[status.status]||status.status;
+      deviceBadge=DEVICE_STATUS_LABELS[status.deviceStatus]||`(code ${status.deviceStatus})`;
+      badgeColor=status.status==='ONLINE'&&status.deviceStatus===0?'var(--green)':'var(--red)';
+    }
+    const escName=m.name.replace(/'/g,"\\'");
+    const escSN=m.sn.replace(/'/g,"\\'");
+    cards.push(`<div class="card" style="margin:0;padding:14px 16px;border-left:4px solid ${badgeColor}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px">
+        <div>
+          <div style="font-size:16px;font-weight:700;color:var(--crust)">${m.name}</div>
+          <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px">${m.sn} · ${m.model||'未知型號'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:${badgeColor};font-size:13px">${statusBadge}</div>
+          <div style="font-size:12px;color:${DEVICE_STATUS_COLOR[status?.deviceStatus]||'var(--muted)'};margin-top:2px">${deviceBadge}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+        <button class="btn btn-yellow btn-sm" onclick="testPrintLabel('${escName}','${escSN}')">🧪 測試列印</button>
+        <button class="btn btn-ghost btn-sm" onclick="editMerchantInfo('${escName}')">✏️ 編輯</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyPrinterInfo('${escName}','${escSN}')">📋 複製資訊</button>
+      </div>
+    </div>`);
+  }
+  // 沒設定 SN 的商家
+  for(const m of withoutSN){
+    const escName=m.name.replace(/'/g,"\\'");
+    cards.push(`<div class="card" style="margin:0;padding:14px 16px;border-left:4px solid var(--line);background:#fafafa">
+      <div style="font-size:16px;font-weight:700;color:var(--muted)">${m.name}</div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0 8px">⚪ 尚未設定印表機 SN</div>
+      <button class="btn btn-ghost btn-sm" onclick="editMerchantInfo('${escName}')">➕ 去設定</button>
+    </div>`);
+  }
+  if(cards.length===0){
+    host.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted)">沒有商家資料。先到 ⚙️ 設定 → 商家管理 新增商家</div>';
+  }else{
+    host.innerHTML=cards.join('');
+  }
+}
+
+// 一鍵測試列印（送一張簡單的測試貼紙）
+async function testPrintLabel(merchantName,sn){
+  if(!confirm(`要送一張測試貼紙到「${merchantName}」（SN: ${sn}）嗎？`))return;
+  showProg(`🧪 送往 ${merchantName} 的印表機…`);
+  const t0=Date.now();
+  // 簡單的 TSPL XML 模板（不需要圖片，純文字）
+  const now=new Date().toLocaleString('zh-TW');
+  const xmlStr=`<page><render width='75' height='100'>
+<t x='10' y='20' font='TSS24.BF2' xMultiple='2' yMultiple='2'>測試列印</t>
+<t x='10' y='220' font='TSS24.BF2'>商家：${merchantName.slice(0,16)}</t>
+<t x='10' y='280' font='TSS16.BF2'>SN：${sn}</t>
+<t x='10' y='340' font='TSS16.BF2'>時間：${now.slice(0,16)}</t>
+<t x='10' y='400' font='TSS16.BF2'>來源：好糰麵包系統</t>
+<t x='10' y='480' font='TSS16.BF2'>列印成功 ✓</t>
+</render></page>`;
+  try{
+    const result=await _callKuaimaiViaSign('tsplXmlWrite',{sn,xmlStr,printTimes:1});
+    const elapsedMs=Date.now()-t0;
+    hideProg();
+    if(result.apiOk){
+      const jobIds=result.json?.data?.jobIds||[];
+      notify(`✅ 測試貼紙已送達 ${merchantName}（${(elapsedMs/1000).toFixed(1)}s）`);
+      logPrintJob(merchantName,sn,'success','test',jobIds,null,elapsedMs);
+    }else{
+      const errMsg=result.json?.message||result.raw||'未知錯誤';
+      const errCode=result.json?.code;
+      notify(`❌ 測試列印失敗：${errMsg}${errCode?' (code:'+errCode+')':''}`,true);
+      logPrintJob(merchantName,sn,'error','test',[],errMsg+(errCode?` (code:${errCode})`:''),elapsedMs);
+    }
+  }catch(err){
+    hideProg();
+    notify(`❌ 測試列印失敗：${err.message||err}`,true);
+    logPrintJob(merchantName,sn,'error','test',[],String(err.message||err),Date.now()-t0);
+  }
+}
+
+// 複製商家印表機資訊（給安裝人員看）
+function copyPrinterInfo(merchantName,sn){
+  const info=getMerchantInfo(merchantName);
+  const text=`【${merchantName} 雲列印設定】
+印表機 SN：${sn}
+設備型號：${info.printerModel||'未填'}
+設備密鑰：${info.printerDeviceKey||'未填'}
+取貨地點：${info.pickupAddr||'未填'}
+聯絡電話：${info.contactPhone||'未填'}`;
+  navigator.clipboard.writeText(text).then(()=>notify('✅ 已複製到剪貼簿'),()=>notify('複製失敗',true));
+}
+
+// =============================================================
+// 列印歷史 log（存 RTDB bread/printJobs）
+// =============================================================
+function logPrintJob(merchantName,sn,status,jobType,jobIds,error,elapsedMs){
+  // jobType: 'sticker' (一般訂單貼紙) / 'test' (測試列印)
+  const log={
+    at:new Date().toISOString(),
+    atLocal:new Date().toLocaleString('zh-TW'),
+    merchantName,
+    sn,
+    status,         // 'success' / 'error'
+    jobType,        // 'sticker' / 'test'
+    jobIds:jobIds||[],
+    error:error||'',
+    elapsedMs:elapsedMs||0,
+    by:CUR?.nickname||CUR?.phone||'(未知)',
+    byRole:CUR?.role||''
+  };
+  const key='log_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  const all=DB.get('printJobs',{})||{};
+  all[key]=log;
+  // 限制最多保留 500 筆（超過刪掉最舊的）
+  const keys=Object.keys(all);
+  if(keys.length>500){
+    const sorted=keys.sort();
+    for(let i=0;i<sorted.length-500;i++)delete all[sorted[i]];
+  }
+  DB.set('printJobs',all);
+  // 如果在印表機管理頁，自動刷新 log table
+  if(el('page-printerMgmt')?.classList.contains('active'))renderPrintHistory();
+}
+
+function populatePrintLogFilter(){
+  const sel=el('pmLogFilter');
+  if(!sel)return;
+  const merchants=getMerchants();
+  const cur=sel.value;
+  sel.innerHTML='<option value="all">全部商家</option>'+merchants.map(m=>`<option value="${m}">${m}</option>`).join('');
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+}
+
+function renderPrintHistory(){
+  const host=el('pmLogTable');
+  if(!host)return;
+  const all=DB.get('printJobs',{})||{};
+  const filterMerchant=el('pmLogFilter')?.value||'all';
+  const filterStatus=el('pmLogStatus')?.value||'all';
+  let logs=Object.values(all).sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+  if(filterMerchant!=='all')logs=logs.filter(l=>l.merchantName===filterMerchant);
+  if(filterStatus!=='all')logs=logs.filter(l=>l.status===filterStatus);
+  logs=logs.slice(0,50);
+  if(logs.length===0){
+    host.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted)">沒有列印紀錄</div>';
+    return;
+  }
+  let html='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--cream)">'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line);white-space:nowrap">時間</th>'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line)">商家</th>'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line)">類型</th>'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line)">狀態</th>'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line)">耗時</th>'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line)">jobIds / 錯誤</th>'+
+    '<th style="padding:8px;text-align:left;border:1px solid var(--line)">操作人</th>'+
+    '</tr></thead><tbody>';
+  for(const l of logs){
+    const statusBadge=l.status==='success'?'<span style="color:var(--green);font-weight:700">✅ 成功</span>':'<span style="color:var(--red);font-weight:700">❌ 失敗</span>';
+    const typeBadge=l.jobType==='test'?'🧪 測試':'🏷️ 訂單貼紙';
+    const elapsedSec=l.elapsedMs?(l.elapsedMs/1000).toFixed(1)+'s':'—';
+    const detail=l.status==='success'?(l.jobIds?.length?l.jobIds.slice(0,3).join(',')+(l.jobIds.length>3?'...':''):'—'):`<span style="color:var(--red)">${(l.error||'').slice(0,80)}</span>`;
+    html+=`<tr><td style="padding:6px 8px;border:1px solid var(--line);font-family:'DM Mono',monospace;font-size:11px;white-space:nowrap">${(l.atLocal||l.at||'').slice(5,16)}</td>
+      <td style="padding:6px 8px;border:1px solid var(--line)">${l.merchantName||''}</td>
+      <td style="padding:6px 8px;border:1px solid var(--line);white-space:nowrap">${typeBadge}</td>
+      <td style="padding:6px 8px;border:1px solid var(--line);white-space:nowrap">${statusBadge}</td>
+      <td style="padding:6px 8px;border:1px solid var(--line);white-space:nowrap">${elapsedSec}</td>
+      <td style="padding:6px 8px;border:1px solid var(--line);font-size:11px">${detail}</td>
+      <td style="padding:6px 8px;border:1px solid var(--line);font-size:11px">${l.by||''}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  host.innerHTML=html;
+}
+
+function exportPrintLogExcel(){
+  const all=DB.get('printJobs',{})||{};
+  const logs=Object.values(all).sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+  if(logs.length===0){notify('沒有資料可匯出',true);return}
+  const data=[['時間','商家','SN','類型','狀態','耗時(秒)','jobIds','錯誤','操作人','角色']];
+  for(const l of logs){
+    data.push([
+      l.atLocal||l.at||'',
+      l.merchantName||'',
+      l.sn||'',
+      l.jobType==='test'?'測試列印':'訂單貼紙',
+      l.status==='success'?'成功':'失敗',
+      l.elapsedMs?(l.elapsedMs/1000).toFixed(1):'',
+      (l.jobIds||[]).join(','),
+      l.error||'',
+      l.by||'',
+      RL[l.byRole]||l.byRole||''
+    ]);
+  }
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  XLSX.utils.book_append_sheet(wb,ws,'列印紀錄');
+  XLSX.writeFile(wb,`列印紀錄_${new Date().toISOString().slice(0,10)}.xlsx`);
+  notify('✅ 已匯出 Excel');
+}
+
+function clearOldPrintLog(){
+  if(!isAdmin(CUR?.role)){notify('僅管理者可操作',true);return}
+  if(!confirm('清除 30 天前的列印紀錄？此動作無法還原。'))return;
+  const all=DB.get('printJobs',{})||{};
+  const cutoff=Date.now()-30*24*3600*1000;
+  let removed=0;
+  for(const [k,v] of Object.entries(all)){
+    const t=new Date(v.at||0).getTime();
+    if(t<cutoff){delete all[k];removed++}
+  }
+  DB.set('printJobs',all);
+  notify(`✅ 已清除 ${removed} 筆 30 天前紀錄`);
+  renderPrintHistory();
 }
 
 // 分裝表 Excel（4頁工作表）
