@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260509-2231">
+<meta name="version" content="20260509-2247">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -633,71 +633,79 @@ button{font-family:var(--font-sans)}
         <span id="pmTutorial-toggle" style="font-size:14px;color:var(--muted)">▼ 點此展開</span>
       </div>
       <div id="pmTutorial" style="display:none;margin-top:12px">
+        <div style="background:#e8f5ea;border-left:4px solid var(--green);padding:12px 16px;border-radius:6px;margin-bottom:14px">
+          <strong style="color:var(--green)">💡 商家完全不需要下載任何 App</strong><br>
+          <div style="font-size:13px;margin-top:4px;line-height:1.7;color:var(--text)">
+            印表機只要「插電 + 連上店家 WiFi」就會自動接收訂單列印指令。<br>
+            商家平時用麵包系統介面就好，印表機放在角落自動工作不用管它。
+          </div>
+        </div>
+
         <div style="background:var(--cream);border-left:4px solid var(--bread);padding:12px 16px;border-radius:6px;margin-bottom:14px">
           <strong style="color:var(--crust)">📦 安裝前準備物品清單</strong>
           <ul style="margin:8px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
-            <li>快麥雲熱敏標籤印表機（型號 E31W / E41W / E20W 等）</li>
-            <li>原廠變壓器（24V 1.5A）</li>
+            <li>快麥雲熱敏標籤印表機（型號 E31W / E41W / E20W 等，由好糰寄出，已預先綁定）</li>
+            <li>原廠變壓器（24V 1.5A，盒內）</li>
             <li>感熱貼紙紙捲（80mm × 100mm 規格）</li>
-            <li>店家無線網路 SSID + 密碼（必須是 <strong>2.4GHz</strong>，不能 5GHz）</li>
-            <li>商家手機（iOS / Android 都行，下載「快麥雲打印」App）</li>
+            <li>店家無線網路 SSID + 密碼，<strong>必須是 2.4GHz</strong>（5GHz 印表機不支援）</li>
+            <li>任何能上網的手機 / 平板 / 筆電（用瀏覽器即可，不裝 App）</li>
           </ul>
         </div>
 
-        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 1 步：開機</div>
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 1 步：開機 + 裝紙捲</div>
         <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
-          <li>把變壓器插到印表機背面（圓孔），另一頭插牆上插座</li>
-          <li>打開印表機側邊電源鍵</li>
-          <li>機器發出「嗶」聲 + 紅燈閃爍 = 開機成功</li>
-        </ol>
-
-        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 2 步：安裝紙捲</div>
-        <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
-          <li>按印表機上方按鈕打開蓋子</li>
-          <li>放入紙捲，紙頭朝外（光滑面朝上）</li>
+          <li>變壓器插到印表機背面圓孔，另一端插牆上插座</li>
+          <li>打開印表機側邊電源鍵 → 機器發出「嗶」聲 + 紅燈閃爍 = 開機成功</li>
+          <li>按印表機上方按鈕打開蓋子，放入紙捲（光滑面朝上）</li>
           <li>把紙頭拉出 5cm，蓋上蓋子聽到「喀」一聲</li>
           <li>按 FEED 鍵測試出紙</li>
         </ol>
 
-        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 3 步：配網（連 WiFi）— 三選一</div>
-        <div style="background:#fff3e0;border:1px dashed var(--bread);padding:12px 16px;border-radius:6px;margin:8px 0">
-          <strong style="color:var(--bread)">⚡ 方式 A（最簡單）：手機 App 配網</strong>
-          <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
-            <li>App Store / Google Play 搜尋「<strong>快麥云打印</strong>」（簡體字）下載安裝</li>
-            <li>打開 App → 註冊或登入快麥帳號</li>
-            <li>點「設備管理 → 添加設備 → 掃碼」</li>
-            <li>對準印表機背面 QR Code 掃描</li>
-            <li>輸入店家 WiFi 名稱 + 密碼（注意：必須 <strong>2.4GHz</strong>）</li>
-            <li>等待 30 秒，設備管理頁面顯示「在線」 = 成功 ✅</li>
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 2 步：配網 — AP 模式（推薦，不用裝 App）</div>
+        <div style="background:#fff3e0;border:1px solid var(--bread);padding:12px 16px;border-radius:6px;margin:8px 0">
+          <strong style="color:var(--bread)">⚡ 流程（5 分鐘搞定）</strong>
+          <ol style="margin:6px 0 0 20px;line-height:1.9;font-size:13px;color:var(--text)">
+            <li>確認印表機已開機（紅燈閃爍）</li>
+            <li><strong>長按印表機 FEED 鍵 5 秒</strong>，聽到「嗶」聲後放開 → 進入 AP 配網模式（藍燈快閃）</li>
+            <li>用手機 / 平板打開 WiFi 設定，找到名稱類似 <code style="background:var(--cream);padding:2px 6px;border-radius:3px">Kuaimai_XXXX</code> 的網路 → 連上去（不需密碼）</li>
+            <li>等 5 秒，手機會自動跳出一個網頁（或手動開瀏覽器輸入 <code style="background:var(--cream);padding:2px 6px;border-radius:3px">192.168.4.1</code>）</li>
+            <li>網頁上選擇店家 WiFi（必須 2.4GHz）→ 輸入 WiFi 密碼 → 提交</li>
+            <li>印表機嗶 2 聲 → 紅燈轉綠燈 = 配網成功</li>
+            <li>手機重新連回店家 WiFi（剛剛連的 Kuaimai_XXXX 會自動消失）</li>
           </ol>
         </div>
-        <div style="background:#e3f2fd;border:1px dashed var(--blue);padding:12px 16px;border-radius:6px;margin:8px 0">
-          <strong style="color:var(--blue)">💻 方式 B：電腦軟體配網（USB 線）</strong>
+
+        <details style="background:#e3f2fd;border:1px dashed var(--blue);padding:10px 14px;border-radius:6px;margin:8px 0">
+          <summary style="cursor:pointer;color:var(--blue);font-weight:700;font-size:13px">💻 備援方式 A：USB 線 + 電腦（適合店裡有筆電的情況）</summary>
           <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
-            <li>下載「快麥標籤管家」<a href="https://dyj.kuaimai.com/" target="_blank">https://dyj.kuaimai.com/</a></li>
+            <li>下載「快麥標籤管家」軟體：<a href="https://dyj.kuaimai.com/" target="_blank">https://dyj.kuaimai.com/</a></li>
             <li>USB 線連印表機 + 電腦</li>
             <li>軟體偵測到設備 → 設定頁面填 WiFi 帳密</li>
             <li>配完拔 USB，印表機自動切 WiFi</li>
           </ol>
-        </div>
-        <div style="background:#fce4ec;border:1px dashed #c2185b;padding:12px 16px;border-radius:6px;margin:8px 0">
-          <strong style="color:#c2185b">📡 方式 C：AP 模式（不裝 App、沒 USB 線）</strong>
-          <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
-            <li>長按印表機 FEED 鍵 5 秒（聽到嗶聲）→ 進入 AP 模式</li>
-            <li>手機 / 電腦的 WiFi 列表會出現「Kuaimai_XXXX」連上</li>
-            <li>瀏覽器自動跳出網頁（或手動開 192.168.4.1）</li>
-            <li>填店家 WiFi 帳密 → 印表機自動切過去</li>
-          </ol>
-        </div>
+        </details>
 
-        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 4 步：取得設備 SN（序號）</div>
+        <details style="background:#f3e5f5;border:1px dashed #8e24aa;padding:10px 14px;border-radius:6px;margin:8px 0">
+          <summary style="cursor:pointer;color:#8e24aa;font-weight:700;font-size:13px">📱 備援方式 B：手機 App（如果 AP 模式跳不出網頁）</summary>
+          <ol style="margin:6px 0 0 20px;line-height:1.8;font-size:13px;color:var(--text)">
+            <li>App Store / Google Play 搜尋「<strong>快麥云打印</strong>」（簡體字）下載</li>
+            <li>打開 App → 用 Ken 給的快麥帳號（17132870369）登入</li>
+            <li>點「設備管理 → 添加設備 → 掃碼」</li>
+            <li>對準印表機背面 QR Code 掃描</li>
+            <li>輸入店家 WiFi 名稱 + 密碼</li>
+            <li>等 30 秒，App 顯示「在線」 = 成功 ✅</li>
+            <li>配完後 App 可以刪除</li>
+          </ol>
+        </details>
+
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 3 步：取得設備 SN（序號）</div>
         <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
           <li>翻到印表機底部，找一張白色貼紙</li>
           <li>「序列號」那行 = SN，格式像 <code style="background:var(--cream);padding:2px 6px;border-radius:3px">KME31W25160294</code></li>
-          <li>抄下來（或拍照）</li>
+          <li>抄下來（或拍照傳給 Ken）</li>
         </ol>
 
-        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 5 步：設定到麵包系統商家</div>
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 4 步：在麵包系統設定（Ken 操作）</div>
         <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
           <li>登入麵包系統 → 設定 → 商家管理</li>
           <li>找到對應商家 → 點「✏️ 編輯商家資料」</li>
@@ -705,12 +713,12 @@ button{font-family:var(--font-sans)}
           <li>填印表機序號 SN → 儲存</li>
         </ol>
 
-        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 6 步：測試列印</div>
+        <div style="font-weight:700;color:var(--crust);font-size:15px;margin:16px 0 8px">第 5 步：遠端驗證（Ken 操作，不用到現場）</div>
         <ol style="margin-left:20px;line-height:1.9;font-size:13px;color:var(--text)">
           <li>回到本頁「📡 設備即時狀態」</li>
           <li>點「🔄 刷新全部狀態」確認該商家顯示「🟢 在線 ✓正常」</li>
           <li>點該商家卡片的「🧪 測試列印」</li>
-          <li>1-3 秒後印表機應該自動吐一張「✅ 測試貼紙」</li>
+          <li>1-3 秒後印表機應該自動吐一張「✅ 測試貼紙」（請安裝人員確認有印出來）</li>
           <li>成功 → 安裝完成 🎉</li>
         </ol>
 
