@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260521-1555">
+<meta name="version" content="20260521-1600">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -2991,15 +2991,28 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
     else if(info.printerBound===false){bindBadge='🔴 未綁定';bindColor='var(--red)'}
     else{bindBadge='⚪ 綁定狀態未知';bindColor='var(--muted)'}
     const unboundHint=isUnbound?`<div style="background:#fff0f0;border:1.5px solid var(--red);color:var(--red);font-weight:700;font-size:12px;padding:4px 10px;border-radius:6px;margin:6px 0;display:inline-block">⚠️ 無法列印${info.printerUnboundAt?'（解綁於 '+info.printerUnboundAt.slice(5,16)+'）':''}</div>`:'';
+    // A: 最後一次配的 WiFi（不是即時查的，雲端 API 查不到當前 SSID）
+    const wifiLine=info.wifiSSID
+      ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">📡 配的 WiFi：<span style="color:var(--crust);font-weight:600;font-family:'DM Mono',monospace">${info.wifiSSID}</span></div>`
+      : `<div style="font-size:11px;color:var(--muted);margin-top:4px">📡 配的 WiFi：<span style="color:#ccc">（未記錄，去 ✏️ 編輯填寫）</span></div>`;
+    // B: 離線時自動提示「可能 WiFi 異動」
     const escName=m.name.replace(/'/g,"\\'");
     const escSN=m.sn.replace(/'/g,"\\'");
     const offline=status&&status.status!=='ONLINE';
+    const offlineHint=offline?`<div style="background:#fff8f0;border-left:3px solid var(--bread);color:var(--crust);font-size:12px;padding:6px 10px;border-radius:5px;margin:6px 0;line-height:1.6">
+      ⚠️ <strong>設備離線</strong> — 常見原因：<br>
+      ① 店家 WiFi 換密碼了 → 按「📶 配網教學」重配<br>
+      ② 印表機沒插電 → 按「📞 通知好糰」請商家檢查<br>
+      ③ 店家停電 / 路由器當機
+    </div>`:'';
     cards.push(`<div class="card" style="margin:0;padding:14px 16px;border-left:4px solid ${leftBarColor};${cardBg}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px">
         <div style="flex:1;min-width:0">
           <div style="font-size:16px;font-weight:700;color:var(--crust)">${m.name}</div>
           <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px">${m.sn} · ${m.model||'未知型號'}</div>
+          ${wifiLine}
           ${unboundHint}
+          ${offlineHint}
           ${lastSeenLine}
         </div>
         <div style="text-align:right;white-space:nowrap">
@@ -3011,6 +3024,7 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
         <button class="btn btn-yellow btn-sm" onclick="testPrintLabel('${escName}','${escSN}')" ${isUnbound?'disabled title="已解綁無法列印，請先按 🔗 綁定" style="opacity:.4;cursor:not-allowed"':''}>🧪 測試列印</button>
         <button class="btn btn-ghost btn-sm" onclick="showWifiSetupDialog('${escName}','${escSN}')">📶 配網教學</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyMerchantWifiGuide('${escName}','${escSN}')" title="一鍵生成換 WiFi 指令文字，可直接貼 LINE 給商家">📲 給商家換 WiFi 指引</button>
         <button class="btn btn-ghost btn-sm" onclick="cancelPrinterJobs('${escName}','${escSN}')" ${isUnbound?'disabled style="opacity:.4;cursor:not-allowed"':''}>⏹ 取消未印</button>
         <button class="btn ${isUnbound?'btn-primary':'btn-ghost'} btn-sm" onclick="bindPrinterOnly('${escName}','${escSN}')" title="把印表機綁到好糰 appId（新機/換機/解綁後重新建立連線）">🔗 綁定</button>
         <button class="btn btn-ghost btn-sm" onclick="unbindPrinterOnly('${escName}','${escSN}')" title="把印表機從好糰 appId 解綁（停用/搬給其他商家用）" style="color:var(--red)" ${isUnbound?'disabled style="opacity:.4;cursor:not-allowed;color:var(--muted)"':''}>🔓 解綁</button>
@@ -3212,6 +3226,58 @@ async function cancelPrinterJobs(merchantName,sn){
     hideProg();
     notify(`❌ 取消失敗：${err.message||err}`,true);
   }
+}
+
+// =============================================================
+// C: 一鍵生成「換 WiFi 指令」給商家（複製到剪貼簿，可貼 LINE）
+// =============================================================
+function copyMerchantWifiGuide(merchantName,sn){
+  const info=getMerchantInfo(merchantName);
+  const ssid=info.wifiSSID||'';
+  const pwd=info.wifiPassword||'';
+  if(!ssid&&!pwd){
+    if(!confirm(`「${merchantName}」還沒填 WiFi 名稱跟密碼。\n\n要先去編輯商家資料填 WiFi 嗎？\n（不填的話生成的指引商家也不知道要連哪個 WiFi）`)){
+      return;
+    }
+    editMerchantInfo(merchantName);return;
+  }
+  const guide=`【🍞 好糰麵包系統｜換印表機 WiFi 指引】
+
+商家：${merchantName}
+印表機 SN：${sn}
+
+──── 操作步驟（5 分鐘搞定，不用裝 App） ────
+
+【1】長按印表機 FEED 鍵 5 秒，聽到「嗶」一聲後放開
+　　 → 紅燈轉快閃 = 進入 AP 配網模式
+
+【2】手機 WiFi 設定 → 找到名稱類似「Kuaimai_XXXX」的熱點
+　　 → 連上去（不需密碼）
+　　 → 若手機說「無網際網路」是正常的，繼續下一步
+
+【3】手機瀏覽器（Safari / Chrome）網址列輸入：
+　　 http://192.168.4.1
+　　 → 會打開印表機自己的設定頁
+
+【4】在那頁找「WiFi 設定」或「Network」，填：
+　　 WiFi 名稱：${ssid||'（請好糰補填）'}
+　　 密 碼：${pwd||'（請好糰補填）'}
+
+【5】按「Save」或「保存」
+　　 → 印表機嗶 2 聲 + 紅燈轉常亮綠燈 = 配網成功
+
+【6】手機 WiFi 重新切回店家 WiFi（Kuaimai_XXXX 會自動消失）
+
+──── 配完跟我說一聲，這邊會幫您驗證上線 ────
+
+📞 好糰客服：0985-855-608
+💬 LINE：@goood.1`;
+  navigator.clipboard.writeText(guide).then(()=>{
+    notify(`✅ 換 WiFi 指引已複製到剪貼簿，可直接貼到 LINE 給商家`);
+  },()=>{
+    // 複製失敗 fallback：顯示在 prompt 讓他手動複製
+    prompt('請手動複製下面文字貼給商家：',guide);
+  });
 }
 
 // =============================================================
