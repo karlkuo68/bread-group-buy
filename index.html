@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260509-2247">
+<meta name="version" content="20260521-1505">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1583,6 +1583,10 @@ function getMerchantInfo(name){
     bankName:'',bankBranch:'',bankAccount:'',accountHolder:'',
     passbookImage:'',passbookFileName:'',notes:'',
     printerSN:'',  // 雲列印：快麥雲印表機序號（選用）
+    printerModel:'',       // 印表機型號 E20W / E31W / E41W / DP158
+    printerDeviceKey:'',   // 設備密鑰（綁定/解綁要用，admin only）
+    wifiSSID:'',           // 店家 WiFi 名稱（給配網用，2.4GHz）
+    wifiPassword:'',       // 店家 WiFi 密碼（給配網用）
     updatedAt:'',updatedBy:''
   };
   return{...defaults,...(info[name]||{}),name};
@@ -1607,7 +1611,8 @@ const MERCHANT_FIELD_LABELS={
   contactName:'聯絡人姓名',contactPhone:'聯絡電話',contactEmail:'聯絡 Email',
   bankName:'銀行',bankBranch:'分行',bankAccount:'帳號',accountHolder:'戶名',
   passbookImage:'帳簿/存摺影本',passbookFileName:'帳簿檔名',notes:'備註',
-  printerSN:'印表機序號'
+  printerSN:'印表機序號',printerModel:'印表機型號',printerDeviceKey:'設備密鑰',
+  wifiSSID:'店家 WiFi 名稱',wifiPassword:'店家 WiFi 密碼'
 };
 // 回傳 {complete, missingFields:[]}；complete = 所有必填都有值
 function getMerchantProfileStatus(name){
@@ -1657,7 +1662,10 @@ function openNotifications(){
   ov.id='notifOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
   const rowsHtml=list.length?list.map(n=>{
-    const typeLabel={merchant_profile_updated:'商家資料更新'}[n.type]||n.type;
+    const typeLabel={
+      merchant_profile_updated:'商家資料更新',
+      printer_restart_request:'🆘 印表機需協助重啟'
+    }[n.type]||n.type;
     const changesHtml=(()=>{
       if(n.type==='merchant_profile_updated'&&n.payload?.diff){
         return Object.entries(n.payload.diff).map(([k,v])=>{
@@ -1666,7 +1674,17 @@ function openNotifications(){
           const newV=String(v.new||'（空）').length>30?String(v.new).slice(0,30)+'…':v.new||'（空）';
           return`<div style="font-size:11px;margin-top:2px"><span style="color:var(--muted)">${lbl}：</span><span style="color:#888;text-decoration:line-through">${oldV}</span> → <span style="color:var(--crust);font-weight:600">${newV}</span></div>`;
         }).join('');
-      }return'';
+      }
+      if(n.type==='printer_restart_request'&&n.payload){
+        const p=n.payload;
+        return`<div style="background:#fff3e0;border-left:3px solid var(--red);padding:8px 10px;border-radius:4px;margin-top:6px;font-size:12px;line-height:1.7">
+          <div><strong>📍 商家：</strong>${p.merchant||''}（${p.pickupAddr||'未填地址'}）</div>
+          <div><strong>🖨️ 印表機：</strong><span style="font-family:'DM Mono',monospace">${p.sn||''}</span> ${p.model||''}</div>
+          <div><strong>📞 聯絡：</strong>${p.contactName||''} ${p.contactPhone?'<a href="tel:'+p.contactPhone+'" style="color:var(--crust);font-weight:700">'+p.contactPhone+'</a>':''}</div>
+          <div style="margin-top:4px"><strong>原因：</strong>${(p.reason||'').replace(/</g,'&lt;')}</div>
+        </div>`;
+      }
+      return'';
     })();
     const bg=n.read?'#fafaf7':'#fff8f0';const bd=n.read?'1px solid #eee':'1.5px solid var(--bread)';
     return`<div style="padding:10px 12px;border-radius:8px;margin-bottom:8px;background:${bg};border:${bd}">
@@ -1801,11 +1819,38 @@ function editMerchantInfo(name){
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">📅 撥款日前 5 個工作天修改，適用本次撥款。</div>
     <div style="font-weight:700;color:var(--crust);margin-bottom:8px;border-bottom:2px solid var(--warm);padding-bottom:4px">🖨️ 雲列印設定 <span style="font-size:11px;color:var(--muted);font-weight:400">（選用，填了才能用「☁ 雲端列印貼紙」按鈕）</span></div>
-    <div style="margin-bottom:6px">
-      <label style="font-size:11px;color:var(--muted)">印表機序號（SN）${isOwn?' <span style="color:var(--muted)">🔒 由好糰管理者設定</span>':''}</label>
-      <input class="inp" id="mi_printerSN" value="${(info.printerSN||'').replace(/"/g,'&quot;')}" placeholder="例：E20W123456789（貼在印表機背面）" ${isOwn?'readonly style="background:var(--warm);width:100%;cursor:not-allowed"':'style="width:100%"'}>
+    <div class="grid-2" style="margin-bottom:6px">
+      <div>
+        <label style="font-size:11px;color:var(--muted)">印表機序號 SN${isOwn?' <span style="color:var(--muted)">🔒 好糰設定</span>':''}</label>
+        <input class="inp" id="mi_printerSN" value="${(info.printerSN||'').replace(/"/g,'&quot;')}" placeholder="例：KME31W25160294" ${isOwn?'readonly style="background:var(--warm);width:100%;cursor:not-allowed"':'style="width:100%"'}>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted)">印表機型號${isOwn?' <span style="color:var(--muted)">🔒</span>':''}</label>
+        <select class="inp" id="mi_printerModel" ${isOwn?'disabled style="background:var(--warm);width:100%;cursor:not-allowed"':'style="width:100%"'}>
+          <option value="">（選擇型號）</option>
+          <option value="E20W" ${info.printerModel==='E20W'?'selected':''}>E20W（雲面單機）</option>
+          <option value="E31W" ${info.printerModel==='E31W'?'selected':''}>E31W（雲標籤機）</option>
+          <option value="E41W" ${info.printerModel==='E41W'?'selected':''}>E41W（雲標籤機）</option>
+          <option value="DP158" ${info.printerModel==='DP158'?'selected':''}>DP158（雲小票機）</option>
+          <option value="其他" ${info.printerModel==='其他'?'selected':''}>其他</option>
+        </select>
+      </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">💡 沒填 SN 也可以用，只是「☁ 雲端列印」按鈕會顯示「未設定印表機」。原本的 PDF 列印不受影響。</div>
+    ${isOwn?'':`<div style="margin-bottom:6px">
+      <label style="font-size:11px;color:var(--muted)">設備密鑰 <span style="color:var(--muted);font-size:10px">（綁定/解綁用，貼在印表機底部標籤上 6 碼）</span></label>
+      <input class="inp" id="mi_printerDeviceKey" value="${(info.printerDeviceKey||'').replace(/"/g,'&quot;')}" placeholder="例：6B30E2" style="width:100%;font-family:'DM Mono',monospace">
+    </div>`}
+    <div class="grid-2" style="margin-bottom:6px">
+      <div>
+        <label style="font-size:11px;color:var(--muted)">店家 WiFi 名稱（SSID）<span style="color:var(--muted);font-size:10px">（2.4GHz）</span></label>
+        <input class="inp" id="mi_wifiSSID" value="${(info.wifiSSID||'').replace(/"/g,'&quot;')}" placeholder="例：Goood-Bread-2G" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted)">店家 WiFi 密碼 <span style="color:var(--muted);font-size:10px">（配網/換 WiFi 用）</span></label>
+        <input class="inp" id="mi_wifiPassword" value="${(info.wifiPassword||'').replace(/"/g,'&quot;')}" placeholder="例：bread12345" style="width:100%;font-family:'DM Mono',monospace">
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.6;padding-left:2px">💡 填 WiFi 資訊後，「📶 換 WiFi 配網教學」彈窗可一鍵複製給商家。原本的 PDF 列印不受影響。</div>
     <div style="margin-bottom:16px"><label style="font-size:11px;color:var(--muted)">備註</label><textarea class="inp" id="mi_notes" rows="2" style="width:100%;resize:vertical">${(info.notes||'').replace(/</g,'&lt;')}</textarea></div>
     ${info.updatedAt?`<div style="font-size:11px;color:var(--muted);margin-bottom:12px">最後更新：${info.updatedAt}${info.updatedBy?' by '+info.updatedBy:''}</div>`:''}
     <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center">
@@ -1852,8 +1897,13 @@ function saveMerchantEditForm(name){
   };
   const taxId=getField('taxId');
   if(taxId&&!/^\d{8}$/.test(taxId)){notify('統編必須是 8 位數字',true);return}
-  // 印表機 SN — 商家本人不能改（同 lockedFields 邏輯），用舊值
+  // 印表機 SN / 型號 / 密鑰 — 商家本人不能改（同 lockedFields 邏輯），用舊值
   const printerSN=isOwn?(oldInfo.printerSN||''):((el('mi_printerSN')?.value||'').trim());
+  const printerModel=isOwn?(oldInfo.printerModel||''):((el('mi_printerModel')?.value||'').trim());
+  const printerDeviceKey=isOwn?(oldInfo.printerDeviceKey||''):((el('mi_printerDeviceKey')?.value||'').trim());
+  // WiFi 商家本人可自填（方便商家換 WiFi 後同步）
+  const wifiSSID=(el('mi_wifiSSID')?.value||'').trim();
+  const wifiPassword=(el('mi_wifiPassword')?.value||'').trim();
   const data={
     title:getField('title'),taxId,
     pickupAddr:getField('pickupAddr'),
@@ -1867,7 +1917,7 @@ function saveMerchantEditForm(name){
     passbookImage:_merchantPassbookPending?.data||'',
     passbookFileName:_merchantPassbookPending?.fileName||'',
     notes:(el('mi_notes')?.value||'').trim(),
-    printerSN
+    printerSN,printerModel,printerDeviceKey,wifiSSID,wifiPassword
   };
   // 必填驗證（除備註外全必填）
   const missing=MERCHANT_REQUIRED_FIELDS.filter(f=>!String(data[f]||'').trim());
@@ -2862,7 +2912,14 @@ async function refreshAllPrinterStatus(){
     for(const name of merchants){
       const info=merchantsInfo[name]||{};
       const sn=(info.printerSN||'').trim();
-      if(sn)withSN.push({name,sn,deviceKey:info.printerDeviceKey||'',model:info.printerModel||'',contactPhone:info.contactPhone||''});
+      if(sn)withSN.push({
+        name,sn,
+        deviceKey:info.printerDeviceKey||'',
+        model:info.printerModel||'',
+        contactPhone:info.contactPhone||'',
+        wifiSSID:info.wifiSSID||'',
+        wifiPassword:info.wifiPassword||''
+      });
       else withoutSN.push({name});
     }
 
@@ -2894,34 +2951,54 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
   const host=el('pmDeviceList');
   if(!host)return;
   const STATUS_LABELS={ONLINE:'🟢 在線',OFFLINE:'🔴 離線',UNACTIVE:'⚫ 未激活',DISABLE:'🚫 已禁用'};
-  const DEVICE_STATUS_LABELS={0:'✓ 正常',1:'⚠️ 開蓋',2:'⚠️ 粘紙',3:'⚠️ 缺紙'};
-  const DEVICE_STATUS_COLOR={0:'var(--green)',1:'var(--bread)',2:'var(--bread)',3:'var(--red)'};
+  // 完整 deviceStatus 狀態碼（依快麥雲文件）
+  const DEVICE_STATUS_LABELS={
+    0:'✓ 正常',1:'⚠️ 開蓋',2:'⚠️ 卡紙',3:'⚠️ 缺紙',
+    4:'⚠️ 列印頭過熱',5:'⚠️ 紙倉滿',6:'⚠️ 電量低',
+    99:'❌ 異常離線'
+  };
+  const DEVICE_STATUS_COLOR={
+    0:'var(--green)',1:'var(--bread)',2:'var(--bread)',3:'var(--red)',
+    4:'var(--red)',5:'var(--bread)',6:'var(--bread)',99:'var(--red)'
+  };
+  // 是否需要店家關注（影響卡片左側色條）
+  const _needAttn=s=>!s||s.status!=='ONLINE'||(s.deviceStatus!==0&&s.deviceStatus!==undefined);
 
   const cards=[];
   // 有設定 SN 的商家
   for(const m of withSN){
     const status=statusMap[m.sn];
     let statusBadge='⚫ 未知',deviceBadge='—',badgeColor='var(--muted)';
+    let lastSeenLine='';
     if(status){
       statusBadge=STATUS_LABELS[status.status]||status.status;
-      deviceBadge=DEVICE_STATUS_LABELS[status.deviceStatus]||`(code ${status.deviceStatus})`;
-      badgeColor=status.status==='ONLINE'&&status.deviceStatus===0?'var(--green)':'var(--red)';
+      deviceBadge=DEVICE_STATUS_LABELS[status.deviceStatus]??`(code ${status.deviceStatus})`;
+      badgeColor=_needAttn(status)?'var(--red)':'var(--green)';
+      if(status.lastOnlineTime){
+        lastSeenLine=`<div style="font-size:11px;color:var(--muted);margin-top:4px">最後上線：${status.lastOnlineTime}</div>`;
+      }
     }
     const escName=m.name.replace(/'/g,"\\'");
     const escSN=m.sn.replace(/'/g,"\\'");
+    const offline=status&&status.status!=='ONLINE';
     cards.push(`<div class="card" style="margin:0;padding:14px 16px;border-left:4px solid ${badgeColor}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px">
-        <div>
+        <div style="flex:1;min-width:0">
           <div style="font-size:16px;font-weight:700;color:var(--crust)">${m.name}</div>
           <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px">${m.sn} · ${m.model||'未知型號'}</div>
+          ${lastSeenLine}
         </div>
-        <div style="text-align:right">
+        <div style="text-align:right;white-space:nowrap">
           <div style="font-weight:700;color:${badgeColor};font-size:13px">${statusBadge}</div>
           <div style="font-size:12px;color:${DEVICE_STATUS_COLOR[status?.deviceStatus]||'var(--muted)'};margin-top:2px">${deviceBadge}</div>
         </div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
         <button class="btn btn-yellow btn-sm" onclick="testPrintLabel('${escName}','${escSN}')">🧪 測試列印</button>
+        <button class="btn btn-ghost btn-sm" onclick="showWifiSetupDialog('${escName}','${escSN}')">📶 配網教學</button>
+        <button class="btn btn-ghost btn-sm" onclick="cancelPrinterJobs('${escName}','${escSN}')">⏹ 取消未印</button>
+        <button class="btn btn-ghost btn-sm" onclick="unbindRebindPrinter('${escName}','${escSN}')" title="解綁後重新綁定，常解除奇怪同步問題">🔄 解綁重綁</button>
+        <button class="btn btn-ghost btn-sm" onclick="notifyKenRestart('${escName}','${escSN}')" style="${offline?'color:var(--red);border:1px solid var(--red)':''}" title="${offline?'設備離線時建議按此通知好糰':'通知好糰客服請商家拔插重啟'}">📞 通知好糰</button>
         <button class="btn btn-ghost btn-sm" onclick="editMerchantInfo('${escName}')">✏️ 編輯</button>
         <button class="btn btn-ghost btn-sm" onclick="copyPrinterInfo('${escName}','${escSN}')">📋 複製資訊</button>
       </div>
@@ -2986,9 +3063,229 @@ function copyPrinterInfo(merchantName,sn){
 印表機 SN：${sn}
 設備型號：${info.printerModel||'未填'}
 設備密鑰：${info.printerDeviceKey||'未填'}
+店家 WiFi：${info.wifiSSID||'未填'}
+WiFi 密碼：${info.wifiPassword||'未填'}
 取貨地點：${info.pickupAddr||'未填'}
 聯絡電話：${info.contactPhone||'未填'}`;
   navigator.clipboard.writeText(text).then(()=>notify('✅ 已複製到剪貼簿'),()=>notify('複製失敗',true));
+}
+
+// =============================================================
+// A: 解綁重綁印表機（軟性 reset，常解奇怪同步問題）
+// =============================================================
+async function unbindRebindPrinter(merchantName,sn){
+  if(!isAdmin(CUR?.role)){notify('僅管理者可操作',true);return}
+  const info=getMerchantInfo(merchantName);
+  if(!info.printerDeviceKey){
+    if(!confirm(`「${merchantName}」沒填設備密鑰，無法重新綁定。\n\n要先去填密鑰嗎？（密鑰在印表機底部 6 碼標籤）`))return;
+    editMerchantInfo(merchantName);return;
+  }
+  if(!confirm(`要對「${merchantName}」（SN: ${sn}）執行「解綁 → 重綁」嗎？\n\n用途：解除雲端與印表機綁定狀態異常、列印任務卡住、長期離線等問題。\n設備本體與 WiFi 設定不會被動到。\n\n約需 5 秒。`))return;
+  showProg(`🔄 步驟 1/2：解綁 ${merchantName}…`);
+  const t0=Date.now();
+  try{
+    const r1=await _callKuaimaiViaSign('unbindDevice',{sn});
+    if(!r1.apiOk){
+      hideProg();
+      const errMsg=r1.json?.message||r1.raw||'解綁失敗';
+      // code 4001 (設備未綁定) 可以視為已解綁，繼續綁定
+      if(!/4001|未绑定|未綁定/.test(errMsg)){
+        notify(`❌ 解綁失敗：${errMsg}`,true);return;
+      }
+    }
+    showProg(`🔄 步驟 2/2：重新綁定 ${merchantName}…`);
+    const r2=await _callKuaimaiViaSign('bindDevice',{
+      sn,
+      deviceKey:info.printerDeviceKey,
+      bindName:'goood-bread-buy',
+      noteName:merchantName.slice(0,30)
+    });
+    hideProg();
+    const elapsedMs=Date.now()-t0;
+    if(r2.apiOk){
+      notify(`✅ 「${merchantName}」解綁重綁完成（${(elapsedMs/1000).toFixed(1)}s），請按「🔄 刷新全部狀態」確認`);
+      logPrintJob(merchantName,sn,'success','rebind',[],null,elapsedMs);
+      setTimeout(refreshAllPrinterStatus,500);
+    }else{
+      const errMsg=r2.json?.message||r2.raw||'重新綁定失敗';
+      notify(`⚠️ 重新綁定失敗：${errMsg}\n設備可能變成解綁狀態，請聯繫好糰`,true);
+      logPrintJob(merchantName,sn,'error','rebind',[],errMsg,elapsedMs);
+    }
+  }catch(err){
+    hideProg();
+    notify(`❌ 解綁重綁失敗：${err.message||err}`,true);
+    logPrintJob(merchantName,sn,'error','rebind',[],String(err.message||err),Date.now()-t0);
+  }
+}
+
+// =============================================================
+// A: 取消未印任務（cancelJob）
+// =============================================================
+async function cancelPrinterJobs(merchantName,sn){
+  if(!confirm(`要取消「${merchantName}」（SN: ${sn}）所有「等待列印中」的任務嗎？\n\n注意：已經在印表機緩衝區裡的可能仍會印出，要徹底停就同時拔電源。`))return;
+  showProg(`⏹ 取消 ${merchantName} 的未印任務…`);
+  try{
+    const result=await _callKuaimaiViaSign('cancelJob',{sn});
+    hideProg();
+    if(result.apiOk){
+      const count=result.json?.data?.canceledCount??result.json?.data?.count??'若干';
+      notify(`✅ 已取消 ${count} 筆未印任務`);
+      logPrintJob(merchantName,sn,'success','cancel',[],null,0);
+    }else{
+      const errMsg=result.json?.message||result.raw||'取消失敗';
+      notify(`❌ 取消失敗：${errMsg}`,true);
+    }
+  }catch(err){
+    hideProg();
+    notify(`❌ 取消失敗：${err.message||err}`,true);
+  }
+}
+
+// =============================================================
+// B: 配網教學彈窗（一鍵複製 WiFi + Comer Label QR + 上線檢測）
+// =============================================================
+function showWifiSetupDialog(merchantName,sn){
+  document.getElementById('wifiSetupOverlay')?.remove();
+  const info=getMerchantInfo(merchantName);
+  const ssid=info.wifiSSID||'';
+  const pwd=info.wifiPassword||'';
+  const contact=info.contactPhone||'';
+  const hasWifi=ssid||pwd;
+  // Comer Label App 下載連結（快麥官方 App）
+  const iosURL='https://apps.apple.com/cn/app/%E7%95%AA%E8%8C%84%E6%89%93%E5%8D%B0/id1525810553';
+  const androidURL='https://www.pgyer.com/comerlabel';
+  const ov=document.createElement('div');
+  ov.id='wifiSetupOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:24px 28px;width:100%;max-width:680px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:2px solid var(--warm);padding-bottom:10px">
+      <div style="font-weight:800;font-size:18px;color:var(--crust)">📶 換 WiFi / 配網教學</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wifiSetupOverlay').remove()">✕</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      商家「<strong style="color:var(--crust)">${merchantName}</strong>」的印表機 <span style="font-family:'DM Mono',monospace">${sn}</span>
+    </div>
+
+    <div style="background:#e8f5ea;border-left:4px solid var(--green);padding:12px 16px;border-radius:6px;margin-bottom:16px">
+      <strong style="color:var(--green)">💡 為什麼網頁不能直接幫商家換 WiFi？</strong><br>
+      <div style="font-size:12px;margin-top:4px;line-height:1.7">
+        印表機沒網路時，雲端 API 連不到它，所以「換 WiFi」這件事一定要商家現場按印表機 + 用手機配。<br>
+        但流程很簡單，照下面 3 步驟做完即可。
+      </div>
+    </div>
+
+    <div style="background:#fff8f0;border:2px solid var(--bread);border-radius:10px;padding:14px 18px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--crust);margin-bottom:10px">📋 商家用的新 WiFi 資訊</div>
+      ${hasWifi?`
+        <table style="width:100%;font-size:13px"><tr>
+          <td style="padding:4px 8px;color:var(--muted);width:90px">WiFi 名稱</td>
+          <td style="padding:4px 8px;font-family:'DM Mono',monospace;font-weight:700">${ssid||'（未填）'}</td>
+          <td><button class="btn btn-yellow btn-sm" onclick="_copyToClip('${ssid.replace(/'/g,"\\'")}',\`已複製 WiFi 名稱：${ssid}\`)" ${ssid?'':'disabled'}>📋 複製</button></td>
+        </tr><tr>
+          <td style="padding:4px 8px;color:var(--muted)">密碼</td>
+          <td style="padding:4px 8px;font-family:'DM Mono',monospace;font-weight:700">${pwd||'（未填）'}</td>
+          <td><button class="btn btn-yellow btn-sm" onclick="_copyToClip('${pwd.replace(/'/g,"\\'")}',\`已複製 WiFi 密碼\`)" ${pwd?'':'disabled'}>📋 複製</button></td>
+        </tr></table>
+        <div style="margin-top:8px"><button class="btn btn-primary btn-sm" onclick="_copyToClip(\`WiFi名稱：${ssid}\\n密碼：${pwd}\`,'已複製完整 WiFi 資訊')">📋 一次複製全部</button></div>
+      `:`
+        <div style="color:var(--red);font-size:13px;line-height:1.7">
+          ⚠️ 沒填這個商家的 WiFi 資訊。<br>
+          請先 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wifiSetupOverlay').remove();editMerchantInfo('${merchantName.replace(/'/g,"\\'")}')">✏️ 編輯商家資料</button> 填好 SSID 跟密碼，再回來複製給商家。
+        </div>
+      `}
+    </div>
+
+    <div style="font-weight:700;color:var(--crust);margin-bottom:10px;font-size:15px">📲 商家端 3 步驟（傳這頁截圖給商家照做）</div>
+
+    <div style="background:#f8f5ee;border-radius:8px;padding:14px 16px;margin-bottom:10px">
+      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 1：印表機進入 AP 配網模式</div>
+      <div style="font-size:13px;line-height:1.8">
+        ① 確認印表機已開機（紅燈閃爍）<br>
+        ② <strong>長按印表機 FEED 鍵 5 秒</strong>，聽到「嗶」聲後放開<br>
+        ③ 看到藍燈快閃 = 進入 AP 模式成功
+      </div>
+    </div>
+
+    <div style="background:#f8f5ee;border-radius:8px;padding:14px 16px;margin-bottom:10px">
+      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 2：用手機下載 Comer Label App（只配網時要用）</div>
+      <div style="font-size:13px;line-height:1.8;margin-bottom:8px">
+        商家平時不需要 App，<strong>只有換 WiFi 時要臨時下載一次</strong>，配完可以刪掉。
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div style="text-align:center">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(iosURL)}" style="border:1px solid #ddd;border-radius:6px" alt="iOS QR">
+          <div style="font-size:11px;margin-top:4px;color:var(--muted)">iOS（App Store）</div>
+        </div>
+        <div style="text-align:center">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(androidURL)}" style="border:1px solid #ddd;border-radius:6px" alt="Android QR">
+          <div style="font-size:11px;margin-top:4px;color:var(--muted)">Android（蒲公英）</div>
+        </div>
+        <div style="flex:1;min-width:200px;font-size:12px;color:var(--muted);line-height:1.7">
+          掃 QR 下載 App → 開啟後選「雲打印機」分頁 → 右上「配網」按鈕。
+        </div>
+      </div>
+    </div>
+
+    <div style="background:#f8f5ee;border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 3：在 App 內輸入店家 WiFi</div>
+      <div style="font-size:13px;line-height:1.8">
+        ① App 會自動搜尋附近的印表機（藍燈那台）<br>
+        ② 選那台後 App 會要 WiFi 名稱跟密碼 → <strong>把上面複製好的貼進去</strong><br>
+        ③ App 顯示「配網成功」+ 印表機紅燈轉綠燈 = 完成<br>
+        ④ 等 30 秒後按下面「重新檢測」確認雲端看得到上線
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding-top:14px">
+      <div style="font-size:11px;color:var(--muted)">${contact?'商家聯絡電話：'+contact:''}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="document.getElementById('wifiSetupOverlay').remove()">關閉</button>
+        <button class="btn btn-primary" onclick="_recheckPrinterOnline('${merchantName.replace(/'/g,"\\'")}','${sn.replace(/'/g,"\\'")}')">🔍 重新檢測上線</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function _copyToClip(text,msg){
+  navigator.clipboard.writeText(text).then(()=>notify('✅ '+(msg||'已複製')),()=>notify('複製失敗',true));
+}
+async function _recheckPrinterOnline(merchantName,sn){
+  showProg('🔍 查詢印表機狀態…');
+  try{
+    const r=await _callKuaimaiViaSign('batchStatus',{snsStr:JSON.stringify([sn])});
+    hideProg();
+    if(r.apiOk){
+      const d=(r.json?.data||[])[0];
+      if(d&&d.status==='ONLINE'){
+        notify(`✅ 「${merchantName}」印表機已上線！配網成功 🎉`);
+        setTimeout(refreshAllPrinterStatus,300);
+      }else{
+        notify(`⚠️ 印表機目前狀態：${d?.status||'未知'}。請再等 30 秒重試，或檢查 WiFi 是否填對`,true);
+      }
+    }else{
+      notify(`❌ 查詢失敗：${r.json?.message||'未知錯誤'}`,true);
+    }
+  }catch(err){hideProg();notify(`❌ 查詢失敗：${err.message||err}`,true);}
+}
+
+// =============================================================
+// C: 通知好糰拔插重啟（寫進通知中心，鈴鐺紅點提醒）
+// =============================================================
+function notifyKenRestart(merchantName,sn){
+  const info=getMerchantInfo(merchantName);
+  const reason=prompt(`要通知好糰客服協助「${merchantName}」拔插重啟印表機嗎？\n\n請簡述狀況（可留空，按 Enter 用預設）：`,'印表機離線/卡住，請打給商家請她拔插電源重啟');
+  if(reason===null)return;
+  addAdminNotification('printer_restart_request',{
+    merchant:merchantName,
+    sn,
+    model:info.printerModel||'',
+    contactPhone:info.contactPhone||'',
+    contactName:info.contactName||'',
+    pickupAddr:info.pickupAddr||'',
+    reason:reason||'印表機需協助重啟'
+  });
+  notify(`✅ 已通知好糰客服（${merchantName}），請等候回覆`);
+  renderNotifBell();
 }
 
 // =============================================================
@@ -3057,7 +3354,8 @@ function renderPrintHistory(){
     '</tr></thead><tbody>';
   for(const l of logs){
     const statusBadge=l.status==='success'?'<span style="color:var(--green);font-weight:700">✅ 成功</span>':'<span style="color:var(--red);font-weight:700">❌ 失敗</span>';
-    const typeBadge=l.jobType==='test'?'🧪 測試':'🏷️ 訂單貼紙';
+    const TYPE_BADGE={test:'🧪 測試',sticker:'🏷️ 訂單貼紙',rebind:'🔄 解綁重綁',cancel:'⏹ 取消任務'};
+    const typeBadge=TYPE_BADGE[l.jobType]||l.jobType||'—';
     const elapsedSec=l.elapsedMs?(l.elapsedMs/1000).toFixed(1)+'s':'—';
     const detail=l.status==='success'?(l.jobIds?.length?l.jobIds.slice(0,3).join(',')+(l.jobIds.length>3?'...':''):'—'):`<span style="color:var(--red)">${(l.error||'').slice(0,80)}</span>`;
     html+=`<tr><td style="padding:6px 8px;border:1px solid var(--line);font-family:'DM Mono',monospace;font-size:11px;white-space:nowrap">${(l.atLocal||l.at||'').slice(5,16)}</td>
