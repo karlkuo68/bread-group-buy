@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260521-1547">
+<meta name="version" content="20260521-1553">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -2965,9 +2965,13 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
   const _needAttn=s=>!s||s.status!=='ONLINE'||(s.deviceStatus!==0&&s.deviceStatus!==undefined);
 
   const cards=[];
+  const merchantsInfoMap=DB.get('merchantsInfo',{})||{};
   // 有設定 SN 的商家
   for(const m of withSN){
     const status=statusMap[m.sn];
+    const info=merchantsInfoMap[m.name]||{};
+    // 綁定狀態（undefined = 未知，假設已綁；false = 確定已解綁；true = 確定已綁）
+    const isUnbound=info.printerBound===false;
     let statusBadge='⚫ 未知',deviceBadge='—',badgeColor='var(--muted)';
     let lastSeenLine='';
     if(status){
@@ -2978,14 +2982,20 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
         lastSeenLine=`<div style="font-size:11px;color:var(--muted);margin-top:4px">最後上線：${status.lastOnlineTime}</div>`;
       }
     }
+    // 解綁狀態 → 左邊條色強制改紅 + 卡片背景灰
+    const cardBg=isUnbound?'background:#fafafa;':'';
+    const leftBarColor=isUnbound?'var(--red)':badgeColor;
+    const unboundBadge=isUnbound?`<div style="background:#fff0f0;border:1.5px solid var(--red);color:var(--red);font-weight:700;font-size:12px;padding:4px 10px;border-radius:6px;margin:6px 0;display:inline-block">⚠️ 已解綁 — 無法列印${info.printerUnboundAt?'（'+info.printerUnboundAt.slice(5,16)+'）':''}</div>`:'';
+    const boundBadge=!isUnbound&&info.printerBound===true?`<div style="background:#e8f5ea;border:1px solid var(--green);color:var(--green);font-size:11px;padding:2px 8px;border-radius:5px;margin:6px 0;display:inline-block">🔗 已綁定</div>`:'';
     const escName=m.name.replace(/'/g,"\\'");
     const escSN=m.sn.replace(/'/g,"\\'");
     const offline=status&&status.status!=='ONLINE';
-    cards.push(`<div class="card" style="margin:0;padding:14px 16px;border-left:4px solid ${badgeColor}">
+    cards.push(`<div class="card" style="margin:0;padding:14px 16px;border-left:4px solid ${leftBarColor};${cardBg}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px">
         <div style="flex:1;min-width:0">
           <div style="font-size:16px;font-weight:700;color:var(--crust)">${m.name}</div>
           <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px">${m.sn} · ${m.model||'未知型號'}</div>
+          ${unboundBadge}${boundBadge}
           ${lastSeenLine}
         </div>
         <div style="text-align:right;white-space:nowrap">
@@ -2994,11 +3004,11 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
         </div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-        <button class="btn btn-yellow btn-sm" onclick="testPrintLabel('${escName}','${escSN}')">🧪 測試列印</button>
+        <button class="btn btn-yellow btn-sm" onclick="testPrintLabel('${escName}','${escSN}')" ${isUnbound?'disabled title="已解綁無法列印，請先按 🔗 綁定" style="opacity:.4;cursor:not-allowed"':''}>🧪 測試列印</button>
         <button class="btn btn-ghost btn-sm" onclick="showWifiSetupDialog('${escName}','${escSN}')">📶 配網教學</button>
-        <button class="btn btn-ghost btn-sm" onclick="cancelPrinterJobs('${escName}','${escSN}')">⏹ 取消未印</button>
-        <button class="btn btn-ghost btn-sm" onclick="bindPrinterOnly('${escName}','${escSN}')" title="把印表機綁到好糰 appId（新機/換機/解綁後重新建立連線）">🔗 綁定</button>
-        <button class="btn btn-ghost btn-sm" onclick="unbindPrinterOnly('${escName}','${escSN}')" title="把印表機從好糰 appId 解綁（停用/搬給其他商家用）" style="color:var(--red)">🔓 解綁</button>
+        <button class="btn btn-ghost btn-sm" onclick="cancelPrinterJobs('${escName}','${escSN}')" ${isUnbound?'disabled style="opacity:.4;cursor:not-allowed"':''}>⏹ 取消未印</button>
+        <button class="btn ${isUnbound?'btn-primary':'btn-ghost'} btn-sm" onclick="bindPrinterOnly('${escName}','${escSN}')" title="把印表機綁到好糰 appId（新機/換機/解綁後重新建立連線）">🔗 綁定</button>
+        <button class="btn btn-ghost btn-sm" onclick="unbindPrinterOnly('${escName}','${escSN}')" title="把印表機從好糰 appId 解綁（停用/搬給其他商家用）" style="color:var(--red)" ${isUnbound?'disabled style="opacity:.4;cursor:not-allowed;color:var(--muted)"':''}>🔓 解綁</button>
         <button class="btn btn-ghost btn-sm" onclick="notifyKenRestart('${escName}','${escSN}')" style="${offline?'color:var(--red);border:1px solid var(--red)':''}" title="${offline?'設備離線時建議按此通知好糰':'通知好糰客服請商家拔插重啟'}">📞 通知好糰</button>
         <button class="btn btn-ghost btn-sm" onclick="editMerchantInfo('${escName}')">✏️ 編輯</button>
         <button class="btn btn-ghost btn-sm" onclick="copyPrinterInfo('${escName}','${escSN}')">📋 複製資訊</button>
@@ -3109,7 +3119,11 @@ async function bindPrinterOnly(merchantName,sn){
     console.log('[bindDevice]',{code,message:msg,full:r});
     hideProg();
     const elapsedMs=Date.now()-t0;
-    if(r.apiOk){
+    // 4011 已綁定 = 對好糰來說也是綁定成功狀態（避免 UI 顯示已解綁）
+    const isAlreadyBound=/4011|已.*绑定|已.*綁定/.test(String(code)+msg);
+    if(r.apiOk||isAlreadyBound){
+      const info=getMerchantInfo(merchantName);
+      saveMerchantInfo(merchantName,{...info,printerBound:true,printerBoundAt:new Date().toLocaleString('zh-TW')});
       notify(`✅ 「${merchantName}」綁定成功（${(elapsedMs/1000).toFixed(1)}s），3 秒後自動刷新狀態`);
       logPrintJob(merchantName,sn,'success','bind',[],null,elapsedMs);
       setTimeout(refreshAllPrinterStatus,3000);
@@ -3145,11 +3159,15 @@ async function unbindPrinterOnly(merchantName,sn){
     hideProg();
     const elapsedMs=Date.now()-t0;
     if(r.apiOk){
-      notify(`✅ 「${merchantName}」解綁成功（${(elapsedMs/1000).toFixed(1)}s），3 秒後自動刷新狀態`);
+      const info=getMerchantInfo(merchantName);
+      saveMerchantInfo(merchantName,{...info,printerBound:false,printerUnboundAt:new Date().toLocaleString('zh-TW')});
+      notify(`✅ 「${merchantName}」解綁成功（${(elapsedMs/1000).toFixed(1)}s），卡片會顯示「已解綁」`);
       logPrintJob(merchantName,sn,'success','unbind',[],null,elapsedMs);
       setTimeout(refreshAllPrinterStatus,3000);
     }else if(/4001|未绑定|未綁定|不存在/.test(String(code)+msg)){
       // 本來就沒綁，視為成功
+      const info=getMerchantInfo(merchantName);
+      saveMerchantInfo(merchantName,{...info,printerBound:false,printerUnboundAt:new Date().toLocaleString('zh-TW')});
       notify(`ℹ️ 「${merchantName}」原本就沒綁定（${msg}）`);
       logPrintJob(merchantName,sn,'success','unbind',[],'(本來就沒綁)',elapsedMs);
       setTimeout(refreshAllPrinterStatus,1000);
