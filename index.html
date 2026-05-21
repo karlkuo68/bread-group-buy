@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260521-1505">
+<meta name="version" content="20260521-1526">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -3076,44 +3076,76 @@ WiFi 密碼：${info.wifiPassword||'未填'}
 async function unbindRebindPrinter(merchantName,sn){
   if(!isAdmin(CUR?.role)){notify('僅管理者可操作',true);return}
   const info=getMerchantInfo(merchantName);
-  if(!info.printerDeviceKey){
-    if(!confirm(`「${merchantName}」沒填設備密鑰，無法重新綁定。\n\n要先去填密鑰嗎？（密鑰在印表機底部 6 碼標籤）`))return;
-    editMerchantInfo(merchantName);return;
+  let deviceKey=(info.printerDeviceKey||'').trim();
+  // 沒密鑰 → 現場 prompt（不跳轉編輯頁，省一步），填完順手存到商家資料
+  if(!deviceKey){
+    const inputKey=prompt(`要對「${merchantName}」（SN: ${sn}）解綁重綁\n\n請輸入印表機設備密鑰（印表機底部標籤上 6 碼英數字，例：6B30E2）：`,'');
+    if(inputKey===null)return;
+    deviceKey=(inputKey||'').trim().toUpperCase();
+    if(!deviceKey){notify('未輸入密鑰',true);return}
+    if(!/^[A-F0-9]{4,12}$/i.test(deviceKey)){
+      if(!confirm(`「${deviceKey}」看起來不像標準的 6 碼設備密鑰格式（應該是英數字混合）。\n\n仍要試試嗎？`))return;
+    }
+    // 順手存進商家資料，下次不用再問
+    saveMerchantInfo(merchantName,{...info,printerDeviceKey:deviceKey});
+    notify(`✅ 已記住「${merchantName}」的設備密鑰，下次不用再輸入`);
   }
-  if(!confirm(`要對「${merchantName}」（SN: ${sn}）執行「解綁 → 重綁」嗎？\n\n用途：解除雲端與印表機綁定狀態異常、列印任務卡住、長期離線等問題。\n設備本體與 WiFi 設定不會被動到。\n\n約需 5 秒。`))return;
+  if(!confirm(`要對「${merchantName}」執行「解綁 → 重綁」嗎？\nSN：${sn}\n密鑰：${deviceKey}\n\n用途：解除綁定狀態異常、列印任務卡住、長期離線等問題。\n設備本體與 WiFi 設定不會被動到。\n\n約需 5 秒。`))return;
   showProg(`🔄 步驟 1/2：解綁 ${merchantName}…`);
   const t0=Date.now();
   try{
-    const r1=await _callKuaimaiViaSign('unbindDevice',{sn});
+    const r1=await _callKuaimaiViaSign('unbindDevice',{sn,deviceKey});
+    const code1=r1.json?.code, msg1=r1.json?.message||r1.raw||'';
+    console.log('[unbindDevice]',{code:code1,message:msg1,full:r1});
     if(!r1.apiOk){
-      hideProg();
-      const errMsg=r1.json?.message||r1.raw||'解綁失敗';
-      // code 4001 (設備未綁定) 可以視為已解綁，繼續綁定
-      if(!/4001|未绑定|未綁定/.test(errMsg)){
-        notify(`❌ 解綁失敗：${errMsg}`,true);return;
+      // code 4001 / 设备未绑定 = 本來就沒綁，可繼續走重綁
+      const isAlreadyUnbound=/4001|未绑定|未綁定|不存在/.test(String(code1)+msg1);
+      if(!isAlreadyUnbound){
+        hideProg();
+        let hint='';
+        if(/4013|权限|權限|绑定方|綁定方|非.*绑定/.test(msg1)){
+          hint='\n\n💡 這台印表機目前綁定在「別的 appId」名下（可能你之前用 Comer Label 的個人帳號配網過）。\n\n解法二選一：\n① 用 Comer Label App 在「雲打印機」頁點 ••• → 解綁，再回來重綁\n② 上 https://open.iot.kuaimai.com 用原帳號登入解綁';
+        }else if(/4001|不存在|未激活/.test(msg1)){
+          hint='\n\n💡 SN 不存在或印表機沒連網。先確認印表機開機 + 連得上 WiFi。';
+        }
+        notify(`❌ 解綁失敗：${msg1}（code:${code1||'?'}）${hint}`,true);
+        logPrintJob(merchantName,sn,'error','rebind',[],`unbind: ${msg1} (code:${code1})`,Date.now()-t0);
+        return;
       }
     }
     showProg(`🔄 步驟 2/2：重新綁定 ${merchantName}…`);
     const r2=await _callKuaimaiViaSign('bindDevice',{
       sn,
-      deviceKey:info.printerDeviceKey,
+      deviceKey,
       bindName:'goood-bread-buy',
       noteName:merchantName.slice(0,30)
     });
+    const code2=r2.json?.code, msg2=r2.json?.message||r2.raw||'';
+    console.log('[bindDevice]',{code:code2,message:msg2,full:r2});
     hideProg();
     const elapsedMs=Date.now()-t0;
     if(r2.apiOk){
-      notify(`✅ 「${merchantName}」解綁重綁完成（${(elapsedMs/1000).toFixed(1)}s），請按「🔄 刷新全部狀態」確認`);
+      notify(`✅ 「${merchantName}」解綁重綁完成（${(elapsedMs/1000).toFixed(1)}s），3 秒後自動刷新狀態`);
       logPrintJob(merchantName,sn,'success','rebind',[],null,elapsedMs);
-      setTimeout(refreshAllPrinterStatus,500);
+      setTimeout(refreshAllPrinterStatus,3000);
     }else{
-      const errMsg=r2.json?.message||r2.raw||'重新綁定失敗';
-      notify(`⚠️ 重新綁定失敗：${errMsg}\n設備可能變成解綁狀態，請聯繫好糰`,true);
-      logPrintJob(merchantName,sn,'error','rebind',[],errMsg,elapsedMs);
+      let hint='';
+      if(/4009|密钥|密鑰/.test(msg2)){
+        hint=`\n\n💡 設備密鑰錯誤。你輸入的是「${deviceKey}」，請對照印表機底部標籤上的 6 碼。\n（已存到商家資料的舊密鑰可能也錯了，去 ✏️ 編輯商家資料 改）`;
+      }else if(/4001|不存在|未激活/.test(msg2)){
+        hint='\n\n💡 SN 不存在或未激活。確認 SN 正確 + 印表機已開機連網。';
+      }else if(/4013|权限|權限/.test(msg2)){
+        hint='\n\n💡 沒權限綁定。可能 SN 屬於別人/別的 appId。';
+      }else if(/4011|已.*绑定|已.*綁定/.test(msg2)){
+        hint='\n\n💡 設備仍綁定中（解綁可能其實沒成功）。再按一次「🔄 解綁重綁」試試。';
+      }
+      notify(`⚠️ 重新綁定失敗：${msg2}（code:${code2||'?'}）${hint}`,true);
+      logPrintJob(merchantName,sn,'error','rebind',[],`bind: ${msg2} (code:${code2})`,elapsedMs);
     }
   }catch(err){
     hideProg();
-    notify(`❌ 解綁重綁失敗：${err.message||err}`,true);
+    console.error('[unbindRebindPrinter]',err);
+    notify(`❌ 解綁重綁失敗（網路/Cloud Function 錯誤）：${err.message||err}\n\n打開 F12 → Console 看詳細`,true);
     logPrintJob(merchantName,sn,'error','rebind',[],String(err.message||err),Date.now()-t0);
   }
 }
