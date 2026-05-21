@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>🍞 好糰團購管理系統</title>
-<meta name="version" content="20260521-1526">
+<meta name="version" content="20260521-1547">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@300;400;500;700;900&family=Nunito:wght@600;700;800;900&family=DM+Mono:wght@400;500&family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -2997,7 +2997,8 @@ function renderPrinterCards(withSN,withoutSN,statusMap){
         <button class="btn btn-yellow btn-sm" onclick="testPrintLabel('${escName}','${escSN}')">🧪 測試列印</button>
         <button class="btn btn-ghost btn-sm" onclick="showWifiSetupDialog('${escName}','${escSN}')">📶 配網教學</button>
         <button class="btn btn-ghost btn-sm" onclick="cancelPrinterJobs('${escName}','${escSN}')">⏹ 取消未印</button>
-        <button class="btn btn-ghost btn-sm" onclick="unbindRebindPrinter('${escName}','${escSN}')" title="解綁後重新綁定，常解除奇怪同步問題">🔄 解綁重綁</button>
+        <button class="btn btn-ghost btn-sm" onclick="bindPrinterOnly('${escName}','${escSN}')" title="把印表機綁到好糰 appId（新機/換機/解綁後重新建立連線）">🔗 綁定</button>
+        <button class="btn btn-ghost btn-sm" onclick="unbindPrinterOnly('${escName}','${escSN}')" title="把印表機從好糰 appId 解綁（停用/搬給其他商家用）" style="color:var(--red)">🔓 解綁</button>
         <button class="btn btn-ghost btn-sm" onclick="notifyKenRestart('${escName}','${escSN}')" style="${offline?'color:var(--red);border:1px solid var(--red)':''}" title="${offline?'設備離線時建議按此通知好糰':'通知好糰客服請商家拔插重啟'}">📞 通知好糰</button>
         <button class="btn btn-ghost btn-sm" onclick="editMerchantInfo('${escName}')">✏️ 編輯</button>
         <button class="btn btn-ghost btn-sm" onclick="copyPrinterInfo('${escName}','${escSN}')">📋 複製資訊</button>
@@ -3071,82 +3072,99 @@ WiFi 密碼：${info.wifiPassword||'未填'}
 }
 
 // =============================================================
-// A: 解綁重綁印表機（軟性 reset，常解奇怪同步問題）
+// A: 解綁/綁定印表機（拆成兩支獨立按鈕）
 // =============================================================
-async function unbindRebindPrinter(merchantName,sn){
-  if(!isAdmin(CUR?.role)){notify('僅管理者可操作',true);return}
+// Helper：取得密鑰（先從商家資料拿，沒有就 prompt 並存起來）
+async function _getOrPromptDeviceKey(merchantName,sn,actionLabel){
   const info=getMerchantInfo(merchantName);
   let deviceKey=(info.printerDeviceKey||'').trim();
-  // 沒密鑰 → 現場 prompt（不跳轉編輯頁，省一步），填完順手存到商家資料
-  if(!deviceKey){
-    const inputKey=prompt(`要對「${merchantName}」（SN: ${sn}）解綁重綁\n\n請輸入印表機設備密鑰（印表機底部標籤上 6 碼英數字，例：6B30E2）：`,'');
-    if(inputKey===null)return;
-    deviceKey=(inputKey||'').trim().toUpperCase();
-    if(!deviceKey){notify('未輸入密鑰',true);return}
-    if(!/^[A-F0-9]{4,12}$/i.test(deviceKey)){
-      if(!confirm(`「${deviceKey}」看起來不像標準的 6 碼設備密鑰格式（應該是英數字混合）。\n\n仍要試試嗎？`))return;
-    }
-    // 順手存進商家資料，下次不用再問
-    saveMerchantInfo(merchantName,{...info,printerDeviceKey:deviceKey});
-    notify(`✅ 已記住「${merchantName}」的設備密鑰，下次不用再輸入`);
+  if(deviceKey)return deviceKey;
+  const inputKey=prompt(`要對「${merchantName}」（SN: ${sn}）執行${actionLabel}\n\n請輸入印表機設備密鑰（印表機底部標籤上 6 碼英數字，例：6B30E2）：`,'');
+  if(inputKey===null)return null;
+  deviceKey=(inputKey||'').trim().toUpperCase();
+  if(!deviceKey){notify('未輸入密鑰',true);return null}
+  if(!/^[A-F0-9]{4,12}$/i.test(deviceKey)){
+    if(!confirm(`「${deviceKey}」看起來不像標準的 6 碼設備密鑰格式（應該是英數字混合）。\n\n仍要試試嗎？`))return null;
   }
-  if(!confirm(`要對「${merchantName}」執行「解綁 → 重綁」嗎？\nSN：${sn}\n密鑰：${deviceKey}\n\n用途：解除綁定狀態異常、列印任務卡住、長期離線等問題。\n設備本體與 WiFi 設定不會被動到。\n\n約需 5 秒。`))return;
-  showProg(`🔄 步驟 1/2：解綁 ${merchantName}…`);
+  saveMerchantInfo(merchantName,{...info,printerDeviceKey:deviceKey});
+  notify(`✅ 已記住「${merchantName}」的設備密鑰，下次不用再輸入`);
+  return deviceKey;
+}
+
+// 🔗 綁定印表機（把 SN 綁到好糰 appId 名下）
+async function bindPrinterOnly(merchantName,sn){
+  if(!isAdmin(CUR?.role)){notify('僅管理者可操作',true);return}
+  const deviceKey=await _getOrPromptDeviceKey(merchantName,sn,'綁定');
+  if(!deviceKey)return;
+  if(!confirm(`要把印表機綁到好糰 appId 嗎？\n商家：${merchantName}\nSN：${sn}\n密鑰：${deviceKey}\n\n用途：新印表機初次啟用、解綁後重新建立連線。\n如果機器已經綁在好糰名下，會回「已綁定」訊息。`))return;
+  showProg(`🔗 綁定 ${merchantName}…`);
   const t0=Date.now();
   try{
-    const r1=await _callKuaimaiViaSign('unbindDevice',{sn,deviceKey});
-    const code1=r1.json?.code, msg1=r1.json?.message||r1.raw||'';
-    console.log('[unbindDevice]',{code:code1,message:msg1,full:r1});
-    if(!r1.apiOk){
-      // code 4001 / 设备未绑定 = 本來就沒綁，可繼續走重綁
-      const isAlreadyUnbound=/4001|未绑定|未綁定|不存在/.test(String(code1)+msg1);
-      if(!isAlreadyUnbound){
-        hideProg();
-        let hint='';
-        if(/4013|权限|權限|绑定方|綁定方|非.*绑定/.test(msg1)){
-          hint='\n\n💡 這台印表機目前綁定在「別的 appId」名下（可能你之前用 Comer Label 的個人帳號配網過）。\n\n解法二選一：\n① 用 Comer Label App 在「雲打印機」頁點 ••• → 解綁，再回來重綁\n② 上 https://open.iot.kuaimai.com 用原帳號登入解綁';
-        }else if(/4001|不存在|未激活/.test(msg1)){
-          hint='\n\n💡 SN 不存在或印表機沒連網。先確認印表機開機 + 連得上 WiFi。';
-        }
-        notify(`❌ 解綁失敗：${msg1}（code:${code1||'?'}）${hint}`,true);
-        logPrintJob(merchantName,sn,'error','rebind',[],`unbind: ${msg1} (code:${code1})`,Date.now()-t0);
-        return;
-      }
-    }
-    showProg(`🔄 步驟 2/2：重新綁定 ${merchantName}…`);
-    const r2=await _callKuaimaiViaSign('bindDevice',{
-      sn,
-      deviceKey,
+    const r=await _callKuaimaiViaSign('bindDevice',{
+      sn,deviceKey,
       bindName:'goood-bread-buy',
       noteName:merchantName.slice(0,30)
     });
-    const code2=r2.json?.code, msg2=r2.json?.message||r2.raw||'';
-    console.log('[bindDevice]',{code:code2,message:msg2,full:r2});
+    const code=r.json?.code, msg=r.json?.message||r.raw||'';
+    console.log('[bindDevice]',{code,message:msg,full:r});
     hideProg();
     const elapsedMs=Date.now()-t0;
-    if(r2.apiOk){
-      notify(`✅ 「${merchantName}」解綁重綁完成（${(elapsedMs/1000).toFixed(1)}s），3 秒後自動刷新狀態`);
-      logPrintJob(merchantName,sn,'success','rebind',[],null,elapsedMs);
+    if(r.apiOk){
+      notify(`✅ 「${merchantName}」綁定成功（${(elapsedMs/1000).toFixed(1)}s），3 秒後自動刷新狀態`);
+      logPrintJob(merchantName,sn,'success','bind',[],null,elapsedMs);
       setTimeout(refreshAllPrinterStatus,3000);
     }else{
       let hint='';
-      if(/4009|密钥|密鑰/.test(msg2)){
-        hint=`\n\n💡 設備密鑰錯誤。你輸入的是「${deviceKey}」，請對照印表機底部標籤上的 6 碼。\n（已存到商家資料的舊密鑰可能也錯了，去 ✏️ 編輯商家資料 改）`;
-      }else if(/4001|不存在|未激活/.test(msg2)){
-        hint='\n\n💡 SN 不存在或未激活。確認 SN 正確 + 印表機已開機連網。';
-      }else if(/4013|权限|權限/.test(msg2)){
-        hint='\n\n💡 沒權限綁定。可能 SN 屬於別人/別的 appId。';
-      }else if(/4011|已.*绑定|已.*綁定/.test(msg2)){
-        hint='\n\n💡 設備仍綁定中（解綁可能其實沒成功）。再按一次「🔄 解綁重綁」試試。';
-      }
-      notify(`⚠️ 重新綁定失敗：${msg2}（code:${code2||'?'}）${hint}`,true);
-      logPrintJob(merchantName,sn,'error','rebind',[],`bind: ${msg2} (code:${code2})`,elapsedMs);
+      if(/4009|密钥|密鑰/.test(msg))hint=`\n\n💡 設備密鑰錯誤。你的密鑰是「${deviceKey}」，請對照印表機底部標籤改一下（去 ✏️ 編輯商家資料）。`;
+      else if(/4001|不存在|未激活/.test(msg))hint='\n\n💡 SN 不存在或未激活。確認 SN 正確 + 印表機已開機連網。';
+      else if(/4013|权限|權限/.test(msg))hint='\n\n💡 沒權限綁定。可能 SN 已綁在別的 appId（先解綁那邊才能綁這邊）。';
+      else if(/4011|已.*绑定|已.*綁定/.test(msg))hint='\n\n💡 設備已綁定在好糰 appId（不用再綁），可以直接列印。';
+      notify(`⚠️ 綁定失敗：${msg}（code:${code||'?'}）${hint}`,true);
+      logPrintJob(merchantName,sn,'error','bind',[],`${msg} (code:${code})`,elapsedMs);
     }
   }catch(err){
     hideProg();
-    console.error('[unbindRebindPrinter]',err);
-    notify(`❌ 解綁重綁失敗（網路/Cloud Function 錯誤）：${err.message||err}\n\n打開 F12 → Console 看詳細`,true);
-    logPrintJob(merchantName,sn,'error','rebind',[],String(err.message||err),Date.now()-t0);
+    console.error('[bindPrinterOnly]',err);
+    notify(`❌ 綁定失敗：${err.message||err}\n\nF12 → Console 看詳細`,true);
+    logPrintJob(merchantName,sn,'error','bind',[],String(err.message||err),Date.now()-t0);
+  }
+}
+
+// 🔓 解綁印表機（把 SN 從好糰 appId 解除）
+async function unbindPrinterOnly(merchantName,sn){
+  if(!isAdmin(CUR?.role)){notify('僅管理者可操作',true);return}
+  const deviceKey=await _getOrPromptDeviceKey(merchantName,sn,'解綁');
+  if(!deviceKey)return;
+  if(!confirm(`⚠️ 確定要解綁印表機嗎？\n商家：${merchantName}\nSN：${sn}\n\n解綁後：\n・這台機從好糰 appId 名下移除\n・「☁ 雲端列印」按鈕將無法把貼紙送到這台機\n・可以再按「🔗 綁定」按鈕重新綁回來\n・原本的 PDF 列印不受影響\n\n用途：停用印表機、搬給其他系統用、或先解綁再重綁排除狀態異常。`))return;
+  showProg(`🔓 解綁 ${merchantName}…`);
+  const t0=Date.now();
+  try{
+    const r=await _callKuaimaiViaSign('unbindDevice',{sn,deviceKey});
+    const code=r.json?.code, msg=r.json?.message||r.raw||'';
+    console.log('[unbindDevice]',{code,message:msg,full:r});
+    hideProg();
+    const elapsedMs=Date.now()-t0;
+    if(r.apiOk){
+      notify(`✅ 「${merchantName}」解綁成功（${(elapsedMs/1000).toFixed(1)}s），3 秒後自動刷新狀態`);
+      logPrintJob(merchantName,sn,'success','unbind',[],null,elapsedMs);
+      setTimeout(refreshAllPrinterStatus,3000);
+    }else if(/4001|未绑定|未綁定|不存在/.test(String(code)+msg)){
+      // 本來就沒綁，視為成功
+      notify(`ℹ️ 「${merchantName}」原本就沒綁定（${msg}）`);
+      logPrintJob(merchantName,sn,'success','unbind',[],'(本來就沒綁)',elapsedMs);
+      setTimeout(refreshAllPrinterStatus,1000);
+    }else{
+      let hint='';
+      if(/4009|密钥|密鑰/.test(msg))hint=`\n\n💡 設備密鑰錯誤。你的密鑰是「${deviceKey}」，請對照印表機底部標籤改一下。`;
+      else if(/4013|权限|權限|绑定方|綁定方|非.*绑定/.test(msg))hint='\n\n💡 這台機目前綁在「別的 appId」名下，你不能解綁。\n要解綁請：\n① 用 Comer Label App 在「雲打印機」頁找到該機 → 點 ••• → 解綁\n② 或上 https://open.iot.kuaimai.com 用原帳號登入解綁';
+      notify(`❌ 解綁失敗：${msg}（code:${code||'?'}）${hint}`,true);
+      logPrintJob(merchantName,sn,'error','unbind',[],`${msg} (code:${code})`,elapsedMs);
+    }
+  }catch(err){
+    hideProg();
+    console.error('[unbindPrinterOnly]',err);
+    notify(`❌ 解綁失敗：${err.message||err}\n\nF12 → Console 看詳細`,true);
+    logPrintJob(merchantName,sn,'error','unbind',[],String(err.message||err),Date.now()-t0);
   }
 }
 
@@ -3174,7 +3192,7 @@ async function cancelPrinterJobs(merchantName,sn){
 }
 
 // =============================================================
-// B: 配網教學彈窗（一鍵複製 WiFi + Comer Label QR + 上線檢測）
+// B: 配網教學彈窗（免 App 主流程：跳印表機內建配置頁 192.168.4.1）
 // =============================================================
 function showWifiSetupDialog(merchantName,sn){
   document.getElementById('wifiSetupOverlay')?.remove();
@@ -3183,15 +3201,19 @@ function showWifiSetupDialog(merchantName,sn){
   const pwd=info.wifiPassword||'';
   const contact=info.contactPhone||'';
   const hasWifi=ssid||pwd;
-  // Comer Label App 下載連結（快麥官方 App）
+  // 印表機 AP 配置頁網址（快麥/各廠家熱敏標籤機通用）
+  const PRINTER_CONFIG_URL='http://192.168.4.1';
+  // 給商家手機掃的 WiFi QR（標準格式，iOS/Android 內建相機可直接連 WiFi）
+  const wifiQrData=hasWifi?`WIFI:T:WPA;S:${ssid};P:${pwd};;`:'';
+  // 備援 App 連結（萬一 192.168.4.1 進不去才用）
   const iosURL='https://apps.apple.com/cn/app/%E7%95%AA%E8%8C%84%E6%89%93%E5%8D%B0/id1525810553';
   const androidURL='https://www.pgyer.com/comerlabel';
   const ov=document.createElement('div');
   ov.id='wifiSetupOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
-  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:24px 28px;width:100%;max-width:680px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:24px 28px;width:100%;max-width:720px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:2px solid var(--warm);padding-bottom:10px">
-      <div style="font-weight:800;font-size:18px;color:var(--crust)">📶 換 WiFi / 配網教學</div>
+      <div style="font-weight:800;font-size:18px;color:var(--crust)">📶 換 WiFi / 配網教學（免 App）</div>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wifiSetupOverlay').remove()">✕</button>
     </div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
@@ -3199,15 +3221,15 @@ function showWifiSetupDialog(merchantName,sn){
     </div>
 
     <div style="background:#e8f5ea;border-left:4px solid var(--green);padding:12px 16px;border-radius:6px;margin-bottom:16px">
-      <strong style="color:var(--green)">💡 為什麼網頁不能直接幫商家換 WiFi？</strong><br>
+      <strong style="color:var(--green)">✨ 不用裝 App！</strong><br>
       <div style="font-size:12px;margin-top:4px;line-height:1.7">
-        印表機沒網路時，雲端 API 連不到它，所以「換 WiFi」這件事一定要商家現場按印表機 + 用手機配。<br>
-        但流程很簡單，照下面 3 步驟做完即可。
+        印表機進 AP 模式後會自己當「臨時 WiFi 熱點」+ 「內建網頁」，<br>
+        商家手機連到那個熱點 → 打開瀏覽器就能配，全程在好糰系統內完成。
       </div>
     </div>
 
     <div style="background:#fff8f0;border:2px solid var(--bread);border-radius:10px;padding:14px 18px;margin-bottom:14px">
-      <div style="font-weight:700;color:var(--crust);margin-bottom:10px">📋 商家用的新 WiFi 資訊</div>
+      <div style="font-weight:700;color:var(--crust);margin-bottom:10px">📋 要配給印表機的店家 WiFi</div>
       ${hasWifi?`
         <table style="width:100%;font-size:13px"><tr>
           <td style="padding:4px 8px;color:var(--muted);width:90px">WiFi 名稱</td>
@@ -3218,55 +3240,94 @@ function showWifiSetupDialog(merchantName,sn){
           <td style="padding:4px 8px;font-family:'DM Mono',monospace;font-weight:700">${pwd||'（未填）'}</td>
           <td><button class="btn btn-yellow btn-sm" onclick="_copyToClip('${pwd.replace(/'/g,"\\'")}',\`已複製 WiFi 密碼\`)" ${pwd?'':'disabled'}>📋 複製</button></td>
         </tr></table>
-        <div style="margin-top:8px"><button class="btn btn-primary btn-sm" onclick="_copyToClip(\`WiFi名稱：${ssid}\\n密碼：${pwd}\`,'已複製完整 WiFi 資訊')">📋 一次複製全部</button></div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="_copyToClip(\`WiFi名稱：${ssid}\\n密碼：${pwd}\`,'已複製完整 WiFi 資訊')">📋 一次複製全部</button>
+        </div>
       `:`
         <div style="color:var(--red);font-size:13px;line-height:1.7">
           ⚠️ 沒填這個商家的 WiFi 資訊。<br>
-          請先 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wifiSetupOverlay').remove();editMerchantInfo('${merchantName.replace(/'/g,"\\'")}')">✏️ 編輯商家資料</button> 填好 SSID 跟密碼，再回來複製給商家。
+          請先 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wifiSetupOverlay').remove();editMerchantInfo('${merchantName.replace(/'/g,"\\'")}')">✏️ 編輯商家資料</button> 填好 SSID 跟密碼，再回來操作。
         </div>
       `}
     </div>
 
-    <div style="font-weight:700;color:var(--crust);margin-bottom:10px;font-size:15px">📲 商家端 3 步驟（傳這頁截圖給商家照做）</div>
+    <div style="font-weight:700;color:var(--crust);margin-bottom:10px;font-size:15px">🚀 商家端 4 步驟（直接照做）</div>
 
     <div style="background:#f8f5ee;border-radius:8px;padding:14px 16px;margin-bottom:10px">
-      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 1：印表機進入 AP 配網模式</div>
+      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 1：讓印表機進入 AP 配網模式</div>
       <div style="font-size:13px;line-height:1.8">
         ① 確認印表機已開機（紅燈閃爍）<br>
-        ② <strong>長按印表機 FEED 鍵 5 秒</strong>，聽到「嗶」聲後放開<br>
-        ③ 看到藍燈快閃 = 進入 AP 模式成功
+        ② <strong>長按印表機 FEED 鍵 5 秒</strong>，聽到「嗶」一聲後放開<br>
+        ③ 紅燈轉為快閃 = 進入 AP 模式成功
       </div>
     </div>
 
     <div style="background:#f8f5ee;border-radius:8px;padding:14px 16px;margin-bottom:10px">
-      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 2：用手機下載 Comer Label App（只配網時要用）</div>
-      <div style="font-size:13px;line-height:1.8;margin-bottom:8px">
-        商家平時不需要 App，<strong>只有換 WiFi 時要臨時下載一次</strong>，配完可以刪掉。
+      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 2：手機 WiFi 連到印表機熱點</div>
+      <div style="font-size:13px;line-height:1.8">
+        手機打開 WiFi 設定 → 找到名稱類似 <strong style="background:#fff;padding:2px 6px;border-radius:3px;font-family:'DM Mono',monospace">Kuaimai_XXXX</strong> 的熱點 → 連上去（不需密碼）<br>
+        <span style="color:var(--muted);font-size:12px">手機可能會說「此網路無網際網路」— 那是正常的，忽略即可，繼續下一步。</span>
       </div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <div style="text-align:center">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(iosURL)}" style="border:1px solid #ddd;border-radius:6px" alt="iOS QR">
-          <div style="font-size:11px;margin-top:4px;color:var(--muted)">iOS（App Store）</div>
-        </div>
-        <div style="text-align:center">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(androidURL)}" style="border:1px solid #ddd;border-radius:6px" alt="Android QR">
-          <div style="font-size:11px;margin-top:4px;color:var(--muted)">Android（蒲公英）</div>
-        </div>
-        <div style="flex:1;min-width:200px;font-size:12px;color:var(--muted);line-height:1.7">
-          掃 QR 下載 App → 開啟後選「雲打印機」分頁 → 右上「配網」按鈕。
-        </div>
+    </div>
+
+    <div style="background:#fff8f0;border:2px solid var(--green);border-radius:10px;padding:14px 18px;margin-bottom:10px">
+      <div style="font-weight:700;color:var(--green);margin-bottom:6px">步驟 3：開印表機配置頁（核心動作）</div>
+      <div style="font-size:13px;line-height:1.8;margin-bottom:10px">
+        確認手機已連到 Kuaimai_XXXX 熱點後，<strong>按下面綠色大鈕</strong>：
+      </div>
+      <button class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;background:var(--green);border-color:var(--green)" onclick="window.open('${PRINTER_CONFIG_URL}','_blank')">🚀 打開印表機配置頁 (${PRINTER_CONFIG_URL})</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.7">
+        ↑ 按下會開新分頁顯示印表機自己的配置介面。<br>
+        如果新分頁沒打開（瀏覽器擋了）→ 商家手機瀏覽器網址列手動輸入 <strong style="font-family:'DM Mono',monospace">192.168.4.1</strong>
+        <button class="btn btn-ghost btn-sm" onclick="_copyToClip('${PRINTER_CONFIG_URL}','已複製 ${PRINTER_CONFIG_URL}')">📋 複製網址</button>
+      </div>
+      <div style="font-size:12px;color:var(--text);margin-top:10px;background:#fff;padding:8px 10px;border-radius:6px;border:1px dashed #ccc;line-height:1.7">
+        <strong>在那個配置頁裡商家要做：</strong><br>
+        ① 找到「WiFi 設定」或「Network」<br>
+        ② SSID 欄填店家 WiFi 名稱（從上方複製貼上）<br>
+        ③ Password 欄填密碼（從上方複製貼上）<br>
+        ④ 按「Save」或「保存」<br>
+        ⑤ 印表機嗶 2 聲 + 紅燈轉常亮綠燈 = 配網成功
       </div>
     </div>
 
     <div style="background:#f8f5ee;border-radius:8px;padding:14px 16px;margin-bottom:14px">
-      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 3：在 App 內輸入店家 WiFi</div>
+      <div style="font-weight:700;color:var(--bread);margin-bottom:6px">步驟 4：回到好糰系統驗證上線</div>
       <div style="font-size:13px;line-height:1.8">
-        ① App 會自動搜尋附近的印表機（藍燈那台）<br>
-        ② 選那台後 App 會要 WiFi 名稱跟密碼 → <strong>把上面複製好的貼進去</strong><br>
-        ③ App 顯示「配網成功」+ 印表機紅燈轉綠燈 = 完成<br>
-        ④ 等 30 秒後按下面「重新檢測」確認雲端看得到上線
+        商家手機重新連回店家 WiFi（Kuaimai_XXXX 會自動消失）→ 回到本頁 → 按下方「🔍 重新檢測上線」確認雲端看得到該印表機。
       </div>
     </div>
+
+    <details style="margin-bottom:14px">
+      <summary style="cursor:pointer;font-weight:700;color:var(--muted);padding:8px 0">🆘 步驟 3 進不去 192.168.4.1？備援方案（這時才需要 App）</summary>
+      <div style="background:#f9f9f9;border-radius:8px;padding:12px 14px;margin-top:8px;font-size:12px;line-height:1.7">
+        部分機型 AP 模式不會啟動內建網頁，這時才需要用快麥官方 App「Comer Label / 番茄打印」：
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">
+          <div style="text-align:center">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(iosURL)}" style="border:1px solid #ddd;border-radius:6px" alt="iOS QR">
+            <div style="font-size:10px;margin-top:2px;color:var(--muted)">iOS</div>
+          </div>
+          <div style="text-align:center">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(androidURL)}" style="border:1px solid #ddd;border-radius:6px" alt="Android QR">
+            <div style="font-size:10px;margin-top:2px;color:var(--muted)">Android</div>
+          </div>
+          <div style="flex:1;min-width:200px">
+            掃 QR 下載 → 開啟 App → 雲打印機分頁 → 右上「配網」 → 選那台 Kuaimai_XXXX → 貼上 WiFi 帳密 → 配完後可刪 App。
+          </div>
+        </div>
+      </div>
+    </details>
+
+    ${hasWifi&&wifiQrData?`<details style="margin-bottom:14px">
+      <summary style="cursor:pointer;font-weight:700;color:var(--muted);padding:8px 0">📱 商家自己一直忘記店家 WiFi 密碼？用 QR 一掃自動連</summary>
+      <div style="background:#f9f9f9;border-radius:8px;padding:12px 14px;margin-top:8px;text-align:center">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(wifiQrData)}" style="border:1px solid #ddd;border-radius:6px" alt="WiFi QR">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7">
+          商家用手機相機掃描即可自動加入店家 WiFi（iOS 13+ / Android 10+ 內建）<br>
+          不是給印表機掃的，是給商家自己手機連店家 WiFi 用的捷徑。
+        </div>
+      </div>
+    </details>`:''}
 
     <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding-top:14px">
       <div style="font-size:11px;color:var(--muted)">${contact?'商家聯絡電話：'+contact:''}</div>
@@ -3386,7 +3447,7 @@ function renderPrintHistory(){
     '</tr></thead><tbody>';
   for(const l of logs){
     const statusBadge=l.status==='success'?'<span style="color:var(--green);font-weight:700">✅ 成功</span>':'<span style="color:var(--red);font-weight:700">❌ 失敗</span>';
-    const TYPE_BADGE={test:'🧪 測試',sticker:'🏷️ 訂單貼紙',rebind:'🔄 解綁重綁',cancel:'⏹ 取消任務'};
+    const TYPE_BADGE={test:'🧪 測試',sticker:'🏷️ 訂單貼紙',rebind:'🔄 解綁重綁',bind:'🔗 綁定',unbind:'🔓 解綁',cancel:'⏹ 取消任務'};
     const typeBadge=TYPE_BADGE[l.jobType]||l.jobType||'—';
     const elapsedSec=l.elapsedMs?(l.elapsedMs/1000).toFixed(1)+'s':'—';
     const detail=l.status==='success'?(l.jobIds?.length?l.jobIds.slice(0,3).join(',')+(l.jobIds.length>3?'...':''):'—'):`<span style="color:var(--red)">${(l.error||'').slice(0,80)}</span>`;
